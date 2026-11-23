@@ -17,6 +17,7 @@ import VerificationMonitoringPanel from "./VerificationMonitoringPanel";
 import AttendanceAnalyticsPanel from "./AttendanceAnalyticsPanel";
 import EmployeeAttendanceDetailsModal from "./EmployeeAttendanceDetailsModal";
 import ReviewAttendanceModal from "./ReviewAttendanceModal";
+import EmployeeAttendanceDownloadModal from "./EmployeeAttendanceDownloadModal";
 
 import {
   getAttendanceMonitoringSummary,
@@ -62,6 +63,7 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
   // Modal States
   const [detailsModal, setDetailsModal] = useState({ open: false, userId: null, record: null });
   const [reviewModal, setReviewModal] = useState({ open: false, record: null });
+  const [downloadModal, setDownloadModal] = useState({ open: false, employee: null });
 
   // Load Summary
   const loadSummary = useCallback(async () => {
@@ -357,6 +359,7 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
           error={errorRecords}
           onRetry={loadRecords}
           onViewEmployee={(userId, rec) => setDetailsModal({ open: true, userId, record: rec })}
+          onDownloadEmployee={(userId, rec) => setDownloadModal({ open: true, employee: rec })}
           onReviewRecord={(rec) => setReviewModal({ open: true, record: rec })}
           onRegularizeRecord={(rec) => {
             setSubTab("regularization");
@@ -421,6 +424,16 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
           isOpen={reviewModal.open}
           onClose={() => setReviewModal({ open: false, record: null })}
           onSuccess={refreshAll}
+          showToast={showToast}
+        />
+      )}
+
+      {/* Individual Employee Attendance Download Modal */}
+      {downloadModal.open && (
+        <EmployeeAttendanceDownloadModal
+          isOpen={downloadModal.open}
+          employee={downloadModal.employee}
+          onClose={() => setDownloadModal({ open: false, employee: null })}
           showToast={showToast}
         />
       )}

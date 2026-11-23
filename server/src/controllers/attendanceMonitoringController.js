@@ -1545,7 +1545,7 @@ export const getEmployeeAttendanceReport = async (req, res) => {
   try {
     const { isSuperAdmin, targetCompanyId } = resolveTargetCompany(req);
     const { userId } = req.params;
-    let { startDate, endDate, format = "json" } = req.query;
+    let { startDate, endDate, range, format = "json" } = req.query;
 
     if (!userId) {
       return res.status(400).json({ error: "User ID is required." });
@@ -1564,35 +1564,85 @@ export const getEmployeeAttendanceReport = async (req, res) => {
     }
     const user = userRes.rows[0];
 
-    // Default dates if not specified (current month)
-    if (!startDate || !endDate) {
-      const monthRange = getThisMonthRange();
-      startDate = startDate || monthRange.startDate;
-      endDate = endDate || monthRange.endDate;
+    // Fetch company allowed radius
+    let allowedRadius = 200;
+    if (user.company_id) {
+      const compRes = await query(
+        `SELECT allowed_radius_meters FROM companies WHERE id = $1`,
+        [user.company_id]
+      );
+      if (compRes.rows[0]?.allowed_radius_meters) {
+        allowedRadius = Number(compRes.rows[0].allowed_radius_meters);
+      }
     }
-    startDate = formatDateOnly(startDate);
-    endDate = formatDateOnly(endDate);
+
+    // Date range resolution: today, this_week, this_month, custom, all
+    let rangeType = range || "custom";
+    let isAllRecords = rangeType === "all" || startDate === "all" || (!startDate && !endDate && req.query.all === "true");
+
+    if (rangeType === "today") {
+      startDate = getTodayDateStr();
+      endDate = startDate;
+    } else if (rangeType === "this_week") {
+      const w = getThisWeekRange();
+      startDate = w.startDate;
+      endDate = w.endDate;
+    } else if (rangeType === "this_month") {
+      const m = getThisMonthRange();
+      startDate = m.startDate;
+      endDate = m.endDate;
+    } else if (isAllRecords) {
+      startDate = null;
+      endDate = null;
+    } else if (!startDate || !endDate) {
+      const m = getThisMonthRange();
+      startDate = startDate || m.startDate;
+      endDate = endDate || m.endDate;
+    }
+
+    if (startDate) startDate = formatDateOnly(startDate);
+    if (endDate) endDate = formatDateOnly(endDate);
 
     // 2. Fetch Attendance Records for range
-    const attSql = `
+    let attSql = `
       SELECT a.*, a.date::text as date_str
       FROM attendance a
-      WHERE a.user_id = $1 AND a.date >= $2 AND a.date <= $3
-      ORDER BY a.date DESC
+      WHERE a.user_id = $1
     `;
-    const attRes = await query(attSql, [userId, startDate, endDate]);
+    const attParams = [userId];
+    if (startDate && endDate) {
+      attParams.push(startDate, endDate);
+      attSql += ` AND a.date >= $2 AND a.date <= $3`;
+    }
+    attSql += ` ORDER BY a.date DESC`;
+    const attRes = await query(attSql, attParams);
     const attendanceRecords = attRes.rows;
 
-    // 3. Process each day's attendance
+    // 3. Fetch approved leaves for leave count
+    let leaveSql = `
+      SELECT * FROM leave_requests
+      WHERE user_id = $1 AND status = 'approved'
+    `;
+    const leaveParams = [userId];
+    if (startDate && endDate) {
+      leaveParams.push(startDate, endDate);
+      leaveSql += ` AND start_date <= $3 AND end_date >= $2`;
+    }
+    const leaveRes = await query(leaveSql, leaveParams);
+    const leaveRecords = leaveRes.rows;
+
+    // 4. Process each day's attendance
     let totalPresentDays = 0;
     let totalLateArrivals = 0;
     let totalAbsentDays = 0;
+    let totalLeaveDays = 0;
     let totalNetWorkingMinutes = 0;
     let totalBreakMinutes = 0;
 
     const shiftStartStr = user.shift_start || "09:00";
     const shiftEndStr = user.shift_end || "18:00";
     const shiftStartMins = parseTimeToMinutes(shiftStartStr) || 540;
+    const shiftEndMins = parseTimeToMinutes(shiftEndStr) || 1080;
 
     const dailyRecords = attendanceRecords.map(a => {
       const dStr = formatDateOnly(a.date_str || a.date);
@@ -1601,25 +1651,74 @@ export const getEmployeeAttendanceReport = async (req, res) => {
       totalNetWorkingMinutes += breakCalc.netWorkingMinutes;
       totalBreakMinutes += breakCalc.totalBreakMinutes;
 
+      let lateMins = 0;
+      let earlyMins = 0;
+
+      const hasApprovedLeave = leaveRecords.some(l => {
+        const lStart = formatDateOnly(l.start_date);
+        const lEnd = formatDateOnly(l.end_date);
+        return dStr >= lStart && dStr <= lEnd;
+      });
+
       let status = a.status || "Present";
-      if (a.check_in) {
+      if (hasApprovedLeave || a.status === "on-leave") {
+        totalLeaveDays++;
+        status = "On Leave";
+      } else if (a.check_in) {
         totalPresentDays++;
         const inMins = parseTimeToMinutes(a.check_in);
         if (inMins !== null && inMins > (shiftStartMins + 5)) {
+          lateMins = inMins - shiftStartMins;
           totalLateArrivals++;
           status = "Late";
         }
-      } else if (a.status === "on-leave") {
-        status = "On Leave";
       } else {
         totalAbsentDays++;
         status = "Absent";
       }
 
+      if (a.check_out) {
+        const outMins = parseTimeToMinutes(a.check_out);
+        if (outMins !== null && outMins < shiftEndMins) {
+          earlyMins = shiftEndMins - outMins;
+        }
+      }
+
+      // Check-in GPS Verification
+      let checkInGpsVerification = "GPS unavailable";
+      if (a.fence_verified_at || (a.distance_from_office_meters != null && Number(a.distance_from_office_meters) <= allowedRadius)) {
+        checkInGpsVerification = "Verified";
+      } else if (a.distance_from_office_meters != null && Number(a.distance_from_office_meters) > allowedRadius) {
+        checkInGpsVerification = "Outside Boundary";
+      } else if (a.check_in_location?.latitude != null && !isNaN(Number(a.check_in_location.latitude))) {
+        checkInGpsVerification = "Logged";
+      }
+
+      // Check-out GPS Verification
+      let checkOutGpsVerification = "GPS unavailable";
+      if (a.check_out_location?.latitude != null && !isNaN(Number(a.check_out_location.latitude))) {
+        checkOutGpsVerification = "Logged";
+      }
+
+      // Late Arrival & Early Departure
+      const lateArrival = lateMins > 0 ? `${lateMins}m` : "0m";
+      const earlyDeparture = earlyMins > 0 ? `${earlyMins}m` : "0m";
+
+      // Additional breaks beyond 3
+      let additionalBreaks = "None";
+      if (breakCalc.breaks.length > 3) {
+        additionalBreaks = breakCalc.breaks
+          .slice(3)
+          .map(b => `${b.type}: ${b.startTimeFormatted} - ${b.endTimeFormatted} (${b.durationFormatted})`)
+          .join("; ");
+      }
+
       return {
         date: dStr,
+        attendanceDate: dStr,
         checkInTime: formatTimeDisplay(a.check_in),
         checkInLocation: breakCalc.checkInLocation,
+        checkInGpsVerification,
         break1Start: breakCalc.break1.start,
         break1End: breakCalc.break1.end,
         break1Duration: breakCalc.break1.duration,
@@ -1629,11 +1728,15 @@ export const getEmployeeAttendanceReport = async (req, res) => {
         break3Start: breakCalc.break3.start,
         break3End: breakCalc.break3.end,
         break3Duration: breakCalc.break3.duration,
+        additionalBreaks,
         totalBreakDuration: breakCalc.totalBreakDuration,
         checkOutTime: formatTimeDisplay(a.check_out),
         checkOutLocation: breakCalc.checkOutLocation,
+        checkOutGpsVerification,
         totalAttendanceDuration: breakCalc.totalAttendanceDuration,
         netWorkingHours: breakCalc.netWorkingHours,
+        lateArrival,
+        earlyDeparture,
         attendanceStatus: status
       };
     });
@@ -1656,8 +1759,11 @@ export const getEmployeeAttendanceReport = async (req, res) => {
       totalWorkingDays,
       totalPresentDays,
       totalAbsentDays,
+      totalLeaveDays,
       totalLateArrivals,
+      totalBreakHours: totalBreakDuration,
       totalBreakDuration,
+      totalWorkingHours: totalNetWorkingHours,
       totalNetWorkingHours,
       averageDailyWorkingHours
     };
@@ -1676,10 +1782,12 @@ export const getEmployeeAttendanceReport = async (req, res) => {
         return `"${str}"`;
       };
 
+      const periodLabel = isAllRecords ? "All Available Records" : `${startDate} to ${endDate}`;
+
       const csvLines = [
         `"INDIVIDUAL EMPLOYEE ATTENDANCE REPORT"`,
         `"Generated On",${escapeCsv(new Date().toLocaleString())}`,
-        `"Reporting Period",${escapeCsv(`${startDate} to ${endDate}`)}`,
+        `"Reporting Period",${escapeCsv(periodLabel)}`,
         `""`,
         `"EMPLOYEE INFORMATION"`,
         `"Employee Name",${escapeCsv(employee.employeeName)}`,
@@ -1687,20 +1795,21 @@ export const getEmployeeAttendanceReport = async (req, res) => {
         `"Department",${escapeCsv(employee.department)}`,
         `"Designation",${escapeCsv(employee.designation)}`,
         `""`,
-        `"SUMMARY STATISTICS"`,
-        `"Total Working Days",${summary.totalWorkingDays}`,
+        `"MONTHLY / SELECTED PERIOD SUMMARY"`,
         `"Total Present Days",${summary.totalPresentDays}`,
         `"Total Absent Days",${summary.totalAbsentDays}`,
+        `"Total Leave Days",${summary.totalLeaveDays}`,
         `"Total Late Arrivals",${summary.totalLateArrivals}`,
-        `"Total Break Duration",${escapeCsv(summary.totalBreakDuration)}`,
-        `"Total Net Working Hours",${escapeCsv(summary.totalNetWorkingHours)}`,
+        `"Total Break Hours",${escapeCsv(summary.totalBreakHours)}`,
+        `"Total Working Hours",${escapeCsv(summary.totalWorkingHours)}`,
         `"Average Daily Working Hours",${escapeCsv(summary.averageDailyWorkingHours)}`,
         `""`,
-        `"DAILY ATTENDANCE RECORDS"`,
+        `"DAILY ATTENDANCE DETAILS"`,
         [
-          "Date",
+          "Attendance Date",
           "Check-in Time",
           "Check-in Location",
+          "Check-in GPS Verification",
           "Break 1 Start",
           "Break 1 End",
           "Break 1 Duration",
@@ -1710,20 +1819,25 @@ export const getEmployeeAttendanceReport = async (req, res) => {
           "Break 3 Start",
           "Break 3 End",
           "Break 3 Duration",
+          "Additional Breaks",
           "Total Break Duration",
           "Check-out Time",
           "Check-out Location",
+          "Check-out GPS Verification",
           "Total Attendance Duration",
           "Net Working Hours",
+          "Late Arrival",
+          "Early Departure",
           "Attendance Status"
         ].map(escapeCsv).join(",")
       ];
 
       dailyRecords.forEach(r => {
         const row = [
-          r.date,
+          r.attendanceDate,
           r.checkInTime,
           r.checkInLocation,
+          r.checkInGpsVerification,
           r.break1Start,
           r.break1End,
           r.break1Duration,
@@ -1733,18 +1847,22 @@ export const getEmployeeAttendanceReport = async (req, res) => {
           r.break3Start,
           r.break3End,
           r.break3Duration,
+          r.additionalBreaks,
           r.totalBreakDuration,
           r.checkOutTime,
           r.checkOutLocation,
+          r.checkOutGpsVerification,
           r.totalAttendanceDuration,
           r.netWorkingHours,
+          r.lateArrival,
+          r.earlyDeparture,
           r.attendanceStatus
         ].map(escapeCsv).join(",");
         csvLines.push(row);
       });
 
       const csvString = csvLines.join("\r\n");
-      const safeFilename = `Attendance_Report_${employee.employeeName.replace(/\s+/g, "_")}_${startDate}_${endDate}.csv`;
+      const safeFilename = `Attendance_Report_${employee.employeeName.replace(/\s+/g, "_")}_${isAllRecords ? "All_Records" : `${startDate}_${endDate}`}.csv`;
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"`);
       return res.send(csvString);
@@ -1755,8 +1873,9 @@ export const getEmployeeAttendanceReport = async (req, res) => {
       employee,
       summary,
       records: dailyRecords,
-      startDate,
-      endDate
+      startDate: startDate || "All",
+      endDate: endDate || "All",
+      range: rangeType
     });
   } catch (err) {
     console.error("getEmployeeAttendanceReport error:", err);

@@ -7,6 +7,7 @@ import {
   ArrowDown,
   Eye,
   Edit3,
+  Download,
   Clock,
   MapPin,
   ShieldCheck,
@@ -27,6 +28,7 @@ export default function EmployeeAttendanceTable({
   error = null,
   onRetry,
   onViewEmployee,
+  onDownloadEmployee,
   onReviewRecord,
   onRegularizeRecord,
 }) {
@@ -589,6 +591,16 @@ export default function EmployeeAttendanceTable({
                     {/* Actions */}
                     <td className="py-3.5 px-4 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => onDownloadEmployee && onDownloadEmployee(rec.userId, rec)}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-emerald-600/10 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/20 hover:border-emerald-600 transition-all cursor-pointer shadow-sm"
+                          title={`Download Attendance Report for ${empName}`}
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download</span>
+                        </button>
+
                         <button
                           type="button"
                           onClick={() => onViewEmployee && onViewEmployee(rec.userId, rec)}

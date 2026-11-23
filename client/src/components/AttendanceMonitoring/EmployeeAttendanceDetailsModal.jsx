@@ -25,9 +25,7 @@ import {
   CalendarRange,
   ArrowRight
 } from "lucide-react";
-import * as XLSX from "xlsx";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import EmployeeAttendanceDownloadModal from "./EmployeeAttendanceDownloadModal";
 import { getEmployeeAttendanceProfile, getEmployeeAttendanceReportApi } from "../../firebase";
 
 export default function EmployeeAttendanceDetailsModal({
@@ -53,15 +51,6 @@ export default function EmployeeAttendanceDetailsModal({
 
   // Export Dialog State
   const [showExportModal, setShowExportModal] = useState(false);
-  const [exportTargetUserId, setExportTargetUserId] = useState(userId);
-  const [exportStartDate, setExportStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    return d.toISOString().split("T")[0];
-  });
-  const [exportEndDate, setExportEndDate] = useState(() => new Date().toISOString().split("T")[0]);
-  const [exportFormat, setExportFormat] = useState("xlsx");
-  const [exporting, setExporting] = useState(false);
 
   // Extract unique employees for selector dropdown
   const uniqueEmployees = useMemo(() => {
@@ -81,7 +70,6 @@ export default function EmployeeAttendanceDetailsModal({
   useEffect(() => {
     if (isOpen && userId) {
       setSelectedUserId(userId);
-      setExportTargetUserId(userId);
       setSelectedDayRecord(initialRecord);
     }
   }, [isOpen, userId, initialRecord]);
@@ -165,286 +153,6 @@ export default function EmployeeAttendanceDetailsModal({
   const netWorkingHours = activeRecord.netWorkingHours || activeRecord.net_working_hours || "00h 00m";
   const attendanceStatus = activeRecord.attendanceStatus || activeRecord.status || "Present";
 
-  // Handle Individual Report Download
-  const handleDownloadReport = async () => {
-    setExporting(true);
-    try {
-      const res = await getEmployeeAttendanceReportApi(exportTargetUserId, {
-        startDate: exportStartDate,
-        endDate: exportEndDate
-      });
-
-      if (!res || !res.records) {
-        throw new Error(res?.error || "Failed to retrieve employee attendance records for export.");
-      }
-
-      const reportEmp = res.employee || user;
-      const reportSummary = res.summary || summary;
-      const records = res.records || [];
-
-      const empNameClean = (reportEmp.employeeName || reportEmp.name || "Employee").replace(/\s+/g, "_");
-      const filenameBase = `Attendance_Report_${empNameClean}_${exportStartDate}_${exportEndDate}`;
-
-      if (exportFormat === "xlsx") {
-        // Build Excel Workbook
-        const aoaData = [
-          ["INDIVIDUAL EMPLOYEE ATTENDANCE REPORT"],
-          ["Generated On", new Date().toLocaleString()],
-          ["Reporting Period", `${exportStartDate} to ${exportEndDate}`],
-          [],
-          ["EMPLOYEE INFORMATION"],
-          ["Employee Name", reportEmp.employeeName || reportEmp.name || "—"],
-          ["Employee ID", reportEmp.employeeId || "—"],
-          ["Department", reportEmp.department || "—"],
-          ["Designation", reportEmp.designation || "—"],
-          [],
-          ["SUMMARY INFORMATION"],
-          ["Total Working Days", reportSummary.totalWorkingDays ?? records.length],
-          ["Total Present Days", reportSummary.totalPresentDays ?? 0],
-          ["Total Absent Days", reportSummary.totalAbsentDays ?? 0],
-          ["Total Late Arrivals", reportSummary.totalLateArrivals ?? 0],
-          ["Total Break Duration", reportSummary.totalBreakDuration || "00h 00m"],
-          ["Total Net Working Hours", reportSummary.totalNetWorkingHours || "00h 00m"],
-          ["Average Daily Working Hours", reportSummary.averageDailyWorkingHours || "00h 00m"],
-          [],
-          [
-            "Attendance Date",
-            "Check-in Time",
-            "Check-in Location",
-            "Break 1 Start",
-            "Break 1 End",
-            "Break 1 Duration",
-            "Break 2 Start",
-            "Break 2 End",
-            "Break 2 Duration",
-            "Break 3 Start",
-            "Break 3 End",
-            "Break 3 Duration",
-            "Total Break Duration",
-            "Check-out Time",
-            "Check-out Location",
-            "Total Attendance Duration",
-            "Net Working Hours",
-            "Attendance Status"
-          ]
-        ];
-
-        records.forEach((r) => {
-          aoaData.push([
-            r.date || "",
-            r.checkInTime || "--",
-            r.checkInLocation || "GPS unavailable",
-            r.break1Start || "—",
-            r.break1End || "—",
-            r.break1Duration || "Not Taken",
-            r.break2Start || "—",
-            r.break2End || "—",
-            r.break2Duration || "Not Taken",
-            r.break3Start || "—",
-            r.break3End || "—",
-            r.break3Duration || "Not Taken",
-            r.totalBreakDuration || "00h 00m",
-            r.checkOutTime || "--",
-            r.checkOutLocation || "GPS unavailable",
-            r.totalAttendanceDuration || "00h 00m",
-            r.netWorkingHours || "00h 00m",
-            r.attendanceStatus || "Present"
-          ]);
-        });
-
-        const ws = XLSX.utils.aoa_to_sheet(aoaData);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Attendance Report");
-        XLSX.writeFile(wb, `${filenameBase}.xlsx`);
-
-        showToast && showToast(`Excel report downloaded for ${reportEmp.employeeName || "employee"}`, "success");
-      } else if (exportFormat === "csv") {
-        // Build CSV string
-        const escapeCsv = (val) => {
-          if (val == null) return '""';
-          const str = String(val).replace(/"/g, '""');
-          return `"${str}"`;
-        };
-
-        const csvLines = [
-          `"INDIVIDUAL EMPLOYEE ATTENDANCE REPORT"`,
-          `"Generated On",${escapeCsv(new Date().toLocaleString())}`,
-          `"Reporting Period",${escapeCsv(`${exportStartDate} to ${exportEndDate}`)}`,
-          `""`,
-          `"EMPLOYEE INFORMATION"`,
-          `"Employee Name",${escapeCsv(reportEmp.employeeName || reportEmp.name || "")}`,
-          `"Employee ID",${escapeCsv(reportEmp.employeeId || "")}`,
-          `"Department",${escapeCsv(reportEmp.department || "")}`,
-          `"Designation",${escapeCsv(reportEmp.designation || "")}`,
-          `""`,
-          `"SUMMARY INFORMATION"`,
-          `"Total Working Days",${reportSummary.totalWorkingDays ?? records.length}`,
-          `"Total Present Days",${reportSummary.totalPresentDays ?? 0}`,
-          `"Total Absent Days",${reportSummary.totalAbsentDays ?? 0}`,
-          `"Total Late Arrivals",${reportSummary.totalLateArrivals ?? 0}`,
-          `"Total Break Duration",${escapeCsv(reportSummary.totalBreakDuration || "00h 00m")}`,
-          `"Total Net Working Hours",${escapeCsv(reportSummary.totalNetWorkingHours || "00h 00m")}`,
-          `"Average Daily Working Hours",${escapeCsv(reportSummary.averageDailyWorkingHours || "00h 00m")}`,
-          `""`,
-          [
-            "Attendance Date",
-            "Check-in Time",
-            "Check-in Location",
-            "Break 1 Start",
-            "Break 1 End",
-            "Break 1 Duration",
-            "Break 2 Start",
-            "Break 2 End",
-            "Break 2 Duration",
-            "Break 3 Start",
-            "Break 3 End",
-            "Break 3 Duration",
-            "Total Break Duration",
-            "Check-out Time",
-            "Check-out Location",
-            "Total Attendance Duration",
-            "Net Working Hours",
-            "Attendance Status"
-          ].map(escapeCsv).join(",")
-        ];
-
-        records.forEach((r) => {
-          csvLines.push([
-            r.date || "",
-            r.checkInTime || "--",
-            r.checkInLocation || "GPS unavailable",
-            r.break1Start || "—",
-            r.break1End || "—",
-            r.break1Duration || "Not Taken",
-            r.break2Start || "—",
-            r.break2End || "—",
-            r.break2Duration || "Not Taken",
-            r.break3Start || "—",
-            r.break3End || "—",
-            r.break3Duration || "Not Taken",
-            r.totalBreakDuration || "00h 00m",
-            r.checkOutTime || "--",
-            r.checkOutLocation || "GPS unavailable",
-            r.totalAttendanceDuration || "00h 00m",
-            r.netWorkingHours || "00h 00m",
-            r.attendanceStatus || "Present"
-          ].map(escapeCsv).join(","));
-        });
-
-        const blob = new Blob([csvLines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", `${filenameBase}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-
-        showToast && showToast(`CSV report downloaded for ${reportEmp.employeeName || "employee"}`, "success");
-      } else if (exportFormat === "pdf") {
-        // Build PDF document
-        const doc = new jsPDF("landscape", "pt", "a4");
-
-        // Header Title
-        doc.setFontSize(16);
-        doc.setTextColor(30, 27, 75); // Deep Indigo
-        doc.text("Zuna HRMS - Individual Employee Attendance Report", 40, 40);
-
-        // Subtitle
-        doc.setFontSize(9);
-        doc.setTextColor(100, 116, 139);
-        doc.text(`Generated On: ${new Date().toLocaleString()} | Period: ${exportStartDate} to ${exportEndDate}`, 40, 56);
-
-        // Employee Card Box
-        doc.setFillColor(248, 250, 252);
-        doc.setDrawColor(226, 232, 240);
-        doc.roundedRect(40, 68, 762, 45, 6, 6, "FD");
-
-        doc.setFontSize(9);
-        doc.setTextColor(15, 23, 42);
-        doc.text(`Employee Name: ${reportEmp.employeeName || reportEmp.name || "—"}`, 50, 85);
-        doc.text(`Employee ID: ${reportEmp.employeeId || "—"}`, 250, 85);
-        doc.text(`Department: ${reportEmp.department || "—"}`, 450, 85);
-        doc.text(`Designation: ${reportEmp.designation || "—"}`, 620, 85);
-
-        doc.text(`Working Days: ${reportSummary.totalWorkingDays ?? records.length} | Present: ${reportSummary.totalPresentDays ?? 0} | Absent: ${reportSummary.totalAbsentDays ?? 0} | Late: ${reportSummary.totalLateArrivals ?? 0}`, 50, 102);
-        doc.text(`Total Breaks: ${reportSummary.totalBreakDuration || "00h 00m"} | Net Work Hours: ${reportSummary.totalNetWorkingHours || "00h 00m"} | Daily Avg: ${reportSummary.averageDailyWorkingHours || "00h 00m"}`, 450, 102);
-
-        // Table
-        const tableBody = records.map((r) => [
-          r.date || "",
-          r.checkInTime || "--",
-          r.checkInLocation || "GPS unavailable",
-          r.break1Duration || "Not Taken",
-          r.break2Duration || "Not Taken",
-          r.break3Duration || "Not Taken",
-          r.totalBreakDuration || "00h 00m",
-          r.checkOutTime || "--",
-          r.checkOutLocation || "GPS unavailable",
-          r.totalAttendanceDuration || "00h 00m",
-          r.netWorkingHours || "00h 00m",
-          r.attendanceStatus || "Present"
-        ]);
-
-        autoTable(doc, {
-          startY: 122,
-          head: [
-            [
-              "Date",
-              "Check In",
-              "In Location",
-              "Break 1",
-              "Break 2",
-              "Break 3",
-              "Total Brk",
-              "Check Out",
-              "Out Location",
-              "Total Att.",
-              "Net Hours",
-              "Status"
-            ]
-          ],
-          body: tableBody,
-          theme: "grid",
-          styles: {
-            fontSize: 7.5,
-            cellPadding: 4,
-            textColor: [30, 41, 59]
-          },
-          headStyles: {
-            fillColor: [79, 70, 229],
-            textColor: [255, 255, 255],
-            fontStyle: "bold"
-          },
-          columnStyles: {
-            0: { cellWidth: 55 },
-            1: { cellWidth: 48 },
-            2: { cellWidth: 80 },
-            3: { cellWidth: 55 },
-            4: { cellWidth: 55 },
-            5: { cellWidth: 55 },
-            6: { cellWidth: 55 },
-            7: { cellWidth: 48 },
-            8: { cellWidth: 80 },
-            9: { cellWidth: 58 },
-            10: { cellWidth: 58, fontStyle: "bold" },
-            11: { cellWidth: 55 }
-          }
-        });
-
-        doc.save(`${filenameBase}.pdf`);
-        showToast && showToast(`PDF report downloaded for ${reportEmp.employeeName || "employee"}`, "success");
-      }
-
-      setShowExportModal(false);
-    } catch (err) {
-      console.error("Export error:", err);
-      showToast && showToast(err.message || "Failed to download attendance report.", "error");
-    } finally {
-      setExporting(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-[#12131A] border border-zinc-700/80 rounded-2xl w-full max-w-5xl max-h-[94vh] flex flex-col shadow-2xl overflow-hidden">
@@ -484,10 +192,7 @@ export default function EmployeeAttendanceDetailsModal({
             {/* Download Attendance Button */}
             <button
               type="button"
-              onClick={() => {
-                setExportTargetUserId(selectedUserId);
-                setShowExportModal(true);
-              }}
+              onClick={() => setShowExportModal(true)}
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-lg shadow-purple-950/40 transition-all cursor-pointer"
             >
               <Download className="w-4 h-4" />
@@ -1099,158 +804,21 @@ export default function EmployeeAttendanceDetailsModal({
         </div>
       </div>
 
-      {/* Download Attendance Modal Dialog */}
+      {/* Individual Employee Attendance Download Modal */}
       {showExportModal && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="bg-[#12131A] border border-purple-500/40 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-5 text-left">
-            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-purple-600/20 text-purple-400 border border-purple-500/30">
-                  <Download className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-base font-bold text-white">Download Employee Attendance</h4>
-                  <p className="text-[11px] text-zinc-400">Generate verified report with breaks & hours.</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowExportModal(false)}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-4 text-xs">
-              {/* Employee Selection */}
-              <div>
-                <label className="text-[11px] font-semibold text-zinc-300 block mb-1">
-                  Selected Employee
-                </label>
-                <select
-                  value={exportTargetUserId}
-                  onChange={(e) => setExportTargetUserId(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-700/80 rounded-xl px-3 py-2 text-zinc-200 text-xs focus:outline-none focus:border-purple-500"
-                >
-                  {uniqueEmployees.length > 0 ? (
-                    uniqueEmployees.map((emp) => (
-                      <option key={emp.id} value={emp.id}>
-                        {emp.name} (#{emp.employeeId})
-                      </option>
-                    ))
-                  ) : (
-                    <option value={user.id || selectedUserId}>
-                      {user.employeeName || user.name || "Current Employee"} (#{user.empId || "EMP"})
-                    </option>
-                  )}
-                </select>
-              </div>
-
-              {/* Date Range Selection */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-semibold text-zinc-300 block mb-1">
-                    Start Date
-                  </label>
-                  <input
-                    type="date"
-                    value={exportStartDate}
-                    onChange={(e) => setExportStartDate(e.target.value)}
-                    className="w-full bg-zinc-900 border border-zinc-700/80 rounded-xl px-3 py-2 text-zinc-200 text-xs focus:outline-none focus:border-purple-500 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-semibold text-zinc-300 block mb-1">
-                    End Date
-                  </label>
-                  <input
-                    type="date"
-                    value={exportEndDate}
-                    onChange={(e) => setExportEndDate(e.target.value)}
-                    className="w-full bg-zinc-900 border border-zinc-700/80 rounded-xl px-3 py-2 text-zinc-200 text-xs focus:outline-none focus:border-purple-500 font-mono"
-                  />
-                </div>
-              </div>
-
-              {/* Export Format Selection */}
-              <div>
-                <label className="text-[11px] font-semibold text-zinc-300 block mb-2">
-                  Select Export Format
-                </label>
-                <div className="grid grid-cols-3 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setExportFormat("xlsx")}
-                    className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all cursor-pointer ${
-                      exportFormat === "xlsx"
-                        ? "bg-purple-600/20 border-purple-500 text-purple-200 font-bold shadow-md shadow-purple-950/40"
-                        : "bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                    }`}
-                  >
-                    <FileSpreadsheet className="w-5 h-5 mb-1 text-emerald-400" />
-                    <span className="text-[11px]">Excel (.xlsx)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setExportFormat("csv")}
-                    className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all cursor-pointer ${
-                      exportFormat === "csv"
-                        ? "bg-purple-600/20 border-purple-500 text-purple-200 font-bold shadow-md shadow-purple-950/40"
-                        : "bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                    }`}
-                  >
-                    <FileText className="w-5 h-5 mb-1 text-cyan-400" />
-                    <span className="text-[11px]">CSV (.csv)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setExportFormat("pdf")}
-                    className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all cursor-pointer ${
-                      exportFormat === "pdf"
-                        ? "bg-purple-600/20 border-purple-500 text-purple-200 font-bold shadow-md shadow-purple-950/40"
-                        : "bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                    }`}
-                  >
-                    <FileText className="w-5 h-5 mb-1 text-rose-400" />
-                    <span className="text-[11px]">PDF (.pdf)</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-800">
-              <button
-                type="button"
-                onClick={() => setShowExportModal(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={exporting}
-                onClick={handleDownloadReport}
-                className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white transition-all shadow-md shadow-purple-950/40 cursor-pointer disabled:opacity-50"
-              >
-                {exporting ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Exporting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Download Report</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
+        <EmployeeAttendanceDownloadModal
+          isOpen={showExportModal}
+          employee={{
+            userId: selectedUserId,
+            employeeName: user.employeeName || user.name,
+            empId: user.empId || user.employeeId,
+            department: user.department,
+            designation: user.designation
+          }}
+          onClose={() => setShowExportModal(false)}
+          showToast={showToast}
+        />
       )}
-    </div>
+      </div>
   );
 }
