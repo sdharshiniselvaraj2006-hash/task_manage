@@ -173,14 +173,30 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
     loadAnalytics();
   }, [loadSummary, loadRecords, loadAnalytics]);
 
+  // Live and Periodic Synchronization
   useEffect(() => {
     loadLive();
-    // Auto refresh live pulse every 45s
+    // Auto refresh live pulse every 30s
     const timer = setInterval(() => {
       loadLive();
-    }, 45000);
-    return () => clearInterval(timer);
-  }, [loadLive]);
+      loadSummary();
+      loadRecords();
+    }, 30000);
+
+    const onSync = () => {
+      loadSummary();
+      loadRecords();
+      loadLive();
+    };
+    window.addEventListener("focus", onSync);
+    window.addEventListener("attendance-updated", onSync);
+
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", onSync);
+      window.removeEventListener("attendance-updated", onSync);
+    };
+  }, [loadLive, loadSummary, loadRecords]);
 
   // Handlers for Regularization Approval / Rejection
   const handleApproveRegularization = async (regId, adminNote) => {

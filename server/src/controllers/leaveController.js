@@ -335,7 +335,7 @@ export const updateLeaveStatus = async (req, res) => {
                VALUES ($1, $2, $3, $4, 'on-leave', $5)
                ON CONFLICT (id) DO UPDATE SET
                  status = CASE 
-                   WHEN attendance.status IN ('present', 'completed', 'checked-in', 'working', 'in-progress') THEN attendance.status 
+                   WHEN attendance.check_in IS NOT NULL OR attendance.status IN ('present', 'late', 'half-day', 'completed', 'checked-in', 'working', 'in-progress') THEN attendance.status 
                    ELSE 'on-leave' 
                  END,
                  notes = EXCLUDED.notes,

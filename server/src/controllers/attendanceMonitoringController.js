@@ -476,7 +476,6 @@ export const getAttendanceMonitoringSummary = async (req, res) => {
         }
       });
     });
-    onLeaveCount = leaveCoverage.size;
 
     // Evaluate each attendance log
     const evaluatedPresentUsers = new Set();
@@ -486,16 +485,19 @@ export const getAttendanceMonitoringSummary = async (req, res) => {
       const shiftStartStr = u?.shift_start || "09:00";
       const shiftStartMins = parseTimeToMinutes(shiftStartStr) || 540;
 
-      const isLeave = a.status === "on-leave";
-      const isLockedOrAbsent = a.is_admin_locked || a.status === "absent" || a.penalty_status;
+      // Actual check-in takes priority over approved leave!
+      const hasCheckedIn = Boolean(a.check_in && !a.is_admin_locked && a.status !== "absent");
 
-      if (!isLeave && !isLockedOrAbsent && a.check_in) {
+      if (hasCheckedIn) {
         evaluatedPresentUsers.add(a.user_id);
+        // Remove employee from onLeaveCount if they checked in
+        leaveCoverage.delete(`${a.user_id}`);
         presentCount++;
 
-        // Late calculation (5-minute grace threshold)
+        // Late calculation (5-minute grace threshold or explicit late status)
         const inMins = parseTimeToMinutes(a.check_in);
-        if (inMins !== null && inMins > (shiftStartMins + 5)) {
+        const isLate = a.status === "late" || (inMins !== null && inMins > (shiftStartMins + 5));
+        if (isLate) {
           lateCount++;
         }
 
@@ -508,22 +510,23 @@ export const getAttendanceMonitoringSummary = async (req, res) => {
       }
     });
 
+    onLeaveCount = leaveCoverage.size;
+
     // Absent employees
     let absentCount = 0;
     if (startDate === endDate) {
       users.forEach(u => {
         const key = `${u.id}_${startDate}`;
         const hasAtt = attMap.get(key);
-        const hasLeave = approvedLeaves.some(l => {
+        const hasCheckedIn = Boolean(hasAtt && hasAtt.check_in && !hasAtt.is_admin_locked && hasAtt.status !== "absent");
+        const hasActiveLeave = !hasCheckedIn && approvedLeaves.some(l => {
           const lStart = formatDateOnly(l.start_date);
           const lEnd = formatDateOnly(l.end_date);
           return l.user_id === u.id && startDate >= lStart && startDate <= lEnd;
         });
 
-        if (!hasLeave) {
-          if (!hasAtt || !hasAtt.check_in || hasAtt.is_admin_locked || hasAtt.status === "absent") {
-            absentCount++;
-          }
+        if (!hasActiveLeave && !hasCheckedIn) {
+          absentCount++;
         }
       });
     } else {
@@ -823,26 +826,27 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
       let attendanceStatus = "Absent";
       if (att?.is_admin_locked) {
         attendanceStatus = "Attendance Locked";
-      } else if (leave || att?.status === "on-leave") {
-        attendanceStatus = "On Leave";
-      } else if (att?.status === "absent" || att?.absence_reason || att?.penalty_status) {
-        attendanceStatus = "Absent";
       } else if (checkInTime) {
+        // Actual check-in takes priority over approved leave!
         if (checkOutTime) {
           if (workingMinutes < 270) {
             attendanceStatus = "Half Day";
-          } else if (lateMinutes > 5) {
+          } else if (lateMinutes > 5 || att?.status?.toLowerCase() === "late") {
             attendanceStatus = "Late";
           } else {
             attendanceStatus = "Present";
           }
         } else {
           if (dStr === getTodayDateStr()) {
-            attendanceStatus = lateMinutes > 5 ? "Late" : "Present";
+            attendanceStatus = (lateMinutes > 5 || att?.status?.toLowerCase() === "late") ? "Late" : "Present";
           } else {
             attendanceStatus = "Incomplete Check-out";
           }
         }
+      } else if (leave || att?.status?.toLowerCase() === "on-leave") {
+        attendanceStatus = "On Leave";
+      } else if (att?.status === "absent" || att?.absence_reason || att?.penalty_status) {
+        attendanceStatus = "Absent";
       } else if (isHoliday) {
         attendanceStatus = "Holiday";
       } else if (isWeekend) {
@@ -853,7 +857,7 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
         if (currentMins < shiftStartMins) {
           attendanceStatus = "Pending";
         } else if (currentMins > shiftStartMins + 15) {
-          attendanceStatus = "Late";
+          attendanceStatus = "Not Checked In";
         } else {
           attendanceStatus = "Pending";
         }
@@ -1153,8 +1157,8 @@ export const getLiveAttendanceMonitoring = async (req, res) => {
         avatarUrl: user.avatar_url || null
       };
 
-      if (leave) {
-        // Handled as on leave
+      if (leave && (!att || !att.check_in)) {
+        // Handled as on leave only if employee has NOT checked in
         return;
       }
 
@@ -1392,17 +1396,21 @@ export const getEmployeeAttendanceProfile = async (req, res) => {
       }
 
       let status = a.status || "Present";
-      if (a.status === "on-leave") {
+      if (a.check_in) {
+        if (breakCalc.netWorkingMinutes > 0 && breakCalc.netWorkingMinutes < 270 && a.check_out) {
+          halfDays++;
+          status = "Half Day";
+        } else if (lateMins > 0 || String(a.status).toLowerCase() === "late") {
+          status = "Late";
+        } else {
+          status = "Present";
+        }
+      } else if (a.status === "on-leave") {
         onLeaveDays++;
         status = "On Leave";
       } else if (a.status === "absent" || a.is_admin_locked) {
         absentDays++;
         status = a.is_admin_locked ? "Attendance Locked" : "Absent";
-      } else if (breakCalc.netWorkingMinutes > 0 && breakCalc.netWorkingMinutes < 270) {
-        halfDays++;
-        status = "Half Day";
-      } else if (lateMins > 0) {
-        status = "Late";
       }
 
       // GPS verification status
@@ -1661,17 +1669,19 @@ export const getEmployeeAttendanceReport = async (req, res) => {
       });
 
       let status = a.status || "Present";
-      if (hasApprovedLeave || a.status === "on-leave") {
-        totalLeaveDays++;
-        status = "On Leave";
-      } else if (a.check_in) {
+      if (a.check_in) {
         totalPresentDays++;
         const inMins = parseTimeToMinutes(a.check_in);
-        if (inMins !== null && inMins > (shiftStartMins + 5)) {
-          lateMins = inMins - shiftStartMins;
+        if ((inMins !== null && inMins > (shiftStartMins + 5)) || String(a.status).toLowerCase() === "late") {
+          lateMins = inMins !== null && inMins > shiftStartMins ? (inMins - shiftStartMins) : 1;
           totalLateArrivals++;
           status = "Late";
+        } else {
+          status = "Present";
         }
+      } else if (hasApprovedLeave || a.status === "on-leave") {
+        totalLeaveDays++;
+        status = "On Leave";
       } else {
         totalAbsentDays++;
         status = "Absent";

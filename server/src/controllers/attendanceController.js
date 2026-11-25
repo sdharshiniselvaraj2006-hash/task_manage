@@ -1670,6 +1670,85 @@ export const checkIn = async (req, res) => {
        ORDER BY check_in DESC NULLS LAST, created_at DESC LIMIT 1`,
       [recordId, userId, today]
     );
+
+    // Fetch employee shift details for accurate Present vs Late determination
+    const userRes = await query(
+      `SELECT id, name, company_id, shift_start, shift_end FROM users WHERE id = $1`,
+      [userId]
+    );
+    const userRecord = userRes.rows[0];
+    const shiftStartStr = userRecord?.shift_start || "09:00";
+    const parseTimeStrMins = (tStr) => {
+      if (!tStr) return 540;
+      const m = String(tStr).match(/(\d{1,2}):(\d{2})/);
+      return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : 540;
+    };
+    const shiftStartMins = parseTimeStrMins(shiftStartStr);
+
+    const checkInDate = new Date(now);
+    const checkInLocalMins = checkInDate.getHours() * 60 + checkInDate.getMinutes();
+    const isLateCheckIn = checkInLocalMins > (shiftStartMins + 5);
+    const calculatedStatus = isLateCheckIn ? "late" : "present";
+
+    // Leave Integration: Check if employee has an approved leave record for today
+    let attNotes = null;
+    const leaveCheckRes = await query(
+      `SELECT * FROM leave_requests 
+       WHERE user_id = $1 
+         AND status = 'approved'
+         AND start_date <= $2 AND end_date >= $2
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId, today]
+    );
+
+    if (leaveCheckRes.rows.length > 0) {
+      const approvedLeave = leaveCheckRes.rows[0];
+      const isFirstCheckInToday = existingRes.rows.length === 0 || !existingRes.rows[0].check_in || existingRes.rows[0].status === "on-leave";
+
+      if (isFirstCheckInToday) {
+        // Employee came to work on their approved leave day:
+        // Actual attendance takes priority. Adjust leave quota back by 1 day.
+        const leaveTypeLower = String(approvedLeave.leave_type || "").toLowerCase();
+        let quotaCol = "casual_leave_quota";
+        let maxQuota = 25;
+        if (leaveTypeLower.includes("sick")) {
+          quotaCol = "sick_leave_quota";
+          maxQuota = 10;
+        } else if (leaveTypeLower.includes("casual") || leaveTypeLower.includes("paid")) {
+          quotaCol = "paid_leave_quota";
+          maxQuota = 6;
+        } else if (leaveTypeLower.includes("annual")) {
+          quotaCol = "casual_leave_quota";
+          maxQuota = 25;
+        }
+
+        await query(
+          `UPDATE users
+           SET ${quotaCol} = LEAST(${maxQuota}, COALESCE(${quotaCol}, 0) + 1),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
+          [userId]
+        ).catch(e => console.error("Error adjusting leave quota on employee check-in:", e));
+
+        attNotes = `Checked in during approved ${approvedLeave.leave_type || 'Leave'} - actual attendance overrides leave for ${today}. 1 day quota adjusted.`;
+
+        auditService.logAudit({
+          userId,
+          action: "ATTENDANCE_OVERRIDE_APPROVED_LEAVE",
+          resourceType: "attendance",
+          resourceId: recordId,
+          details: {
+            leaveId: approvedLeave.id,
+            leaveType: approvedLeave.leave_type,
+            date: today,
+            quotaRestored: quotaCol,
+            status: calculatedStatus
+          },
+          req
+        });
+      }
+    }
+
     let sessions = [];
     let accumulatedMins = 0;
     let row;
@@ -1757,12 +1836,13 @@ export const checkIn = async (req, res) => {
          SET id = $5,
              check_in = $1,
              check_out = NULL,
-             status = 'present',
+             status = $7,
              check_in_location = $2,
              sessions = $3,
              accumulated_working_minutes = $4,
              duration_minutes = $4,
              breaks = '[]'::jsonb,
+             notes = COALESCE($8, notes),
              is_admin_locked = FALSE,
              penalty_status = NULL,
              penalty_reason = NULL,
@@ -1771,7 +1851,7 @@ export const checkIn = async (req, res) => {
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $6 OR id = $5
          RETURNING *`,
-        [now, JSON.stringify(location || {}), JSON.stringify(sessions), accumulatedMins, recordId, targetId]
+        [now, JSON.stringify(location || {}), JSON.stringify(sessions), accumulatedMins, recordId, targetId, calculatedStatus, attNotes]
       );
       row = updateRes.rows[0];
 
@@ -1791,12 +1871,13 @@ export const checkIn = async (req, res) => {
       }];
 
       const insertRes = await query(
-        `INSERT INTO attendance (id, user_id, company_id, date, check_in, status, work_mode, check_in_location, location, sessions, accumulated_working_minutes, duration_minutes)
-         VALUES ($1, $2, $3, $4, $5, 'present', $6, $7, $7, $8, 0, 0)
+        `INSERT INTO attendance (id, user_id, company_id, date, check_in, status, notes, work_mode, check_in_location, location, sessions, accumulated_working_minutes, duration_minutes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, 0, 0)
          ON CONFLICT (id) DO UPDATE SET
            check_in = EXCLUDED.check_in,
            check_out = NULL,
-           status = 'present',
+           status = EXCLUDED.status,
+           notes = COALESCE(EXCLUDED.notes, attendance.notes),
            check_in_location = EXCLUDED.check_in_location,
            sessions = EXCLUDED.sessions,
            is_admin_locked = FALSE,
@@ -1805,12 +1886,11 @@ export const checkIn = async (req, res) => {
            auto_checked_out = FALSE,
            updated_at = CURRENT_TIMESTAMP
          RETURNING *`,
-        [recordId, userId, companyId, today, now, workMode, JSON.stringify(location || {}), JSON.stringify(sessions)]
+        [recordId, userId, companyId, today, now, calculatedStatus, attNotes || "Office Check-in", workMode, JSON.stringify(location || {}), JSON.stringify(sessions)]
       );
       row = insertRes.rows[0];
     }
 
-    const checkInDate = row.check_in ? new Date(row.check_in) : new Date();
     const formatTime = (d) => d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : "";
 
     auditService.logAudit({
@@ -1818,7 +1898,7 @@ export const checkIn = async (req, res) => {
       action: "ATTENDANCE_CLOCK_IN",
       resourceType: "attendance",
       resourceId: row.id,
-      details: { date: today, workMode, location, accumulatedWorkingMinutes: accumulatedMins, verificationSessionId: sessionRes.rows[0].id },
+      details: { date: today, workMode, location, status: calculatedStatus, accumulatedWorkingMinutes: accumulatedMins, verificationSessionId: sessionRes.rows[0].id },
       req
     });
 
@@ -1836,7 +1916,7 @@ export const checkIn = async (req, res) => {
       totalWorkingMinutes: accumulatedMins,
       durationMinutes: accumulatedMins,
       duration_minutes: accumulatedMins,
-      status: "checked-in"
+      status: calculatedStatus === "late" ? "Late" : "Present"
     });
   } catch (err) {
     console.error("checkIn error:", err);
@@ -1949,7 +2029,17 @@ export const checkOut = async (req, res) => {
       });
     }
 
-    const checkoutStatus = totalDayMins < 240 ? "half-day" : "present";
+    // Preserve 'late' status if the employee checked in late
+    const prevIn = rowData.check_in;
+    const wasLate = rowData.status === "late" || (prevIn && (() => {
+      const inD = new Date(prevIn);
+      const inMins = inD.getHours() * 60 + inD.getMinutes();
+      const m = String(req.user?.shift_start || "09:00").match(/(\d{1,2}):(\d{2})/);
+      const sMins = m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : 540;
+      return inMins > (sMins + 5);
+    })());
+
+    const checkoutStatus = totalDayMins < 240 ? "half-day" : (wasLate ? "late" : "present");
 
     const result = await query(
       `UPDATE attendance

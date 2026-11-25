@@ -877,6 +877,7 @@ export default function UserDashboard() {
         if (res) {
           setTodayLog(res);
         }
+        window.dispatchEvent(new Event("attendance-updated"));
         showToast("Biometric verification verified! Checked in successfully.", "success");
       } else {
         const res = await checkOut(currentUser, biometricModal.location, verifyRes.verificationSessionToken);
@@ -884,6 +885,7 @@ export default function UserDashboard() {
           setTodayLog(res);
         }
         setUserTasks(prev => (prev || []).map(t => ({ ...t, timerStartedAt: null })));
+        window.dispatchEvent(new Event("attendance-updated"));
         showToast("Biometric verification verified! Checked out successfully.", "success");
       }
 
