@@ -166,13 +166,15 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
         : new Date(task.assigned_at || task.created_at).getTime();
 
       const elapsedMinutes = Math.floor((Date.now() - baselineTime) / (60 * 1000));
+      // Reporting cycle is 5 minutes. Overdue minutes start after 5 minutes:
+      const overdueMinutes = elapsedMinutes - 5;
 
-      // Rule 1: Progress reminder when report is approaching due (3 to 4 minutes without report)
-      if (elapsedMinutes >= 3 && elapsedMinutes < 5 && !remindedUsers.has(task.assigned_to)) {
+      // Rule 1: Progress reminder when report is overdue (0 <= overdueMinutes < 5, i.e. 5 to 9 minutes elapsed)
+      if (overdueMinutes >= 0 && overdueMinutes < 5 && !remindedUsers.has(task.assigned_to)) {
         const notifResult = await sendNotificationOnce({
           userId: task.assigned_to,
-          title: `Task Progress Report Due: ${task.task_title}`,
-          message: `Your progress report on task "${task.task_title}" is due. Please submit your progress report within 5 minutes to prevent attendance being marked Absent.`,
+          title: `Task Progress Report Overdue: ${task.task_title}`,
+          message: `Your progress report on task "${task.task_title}" is overdue (by ${Math.max(1, overdueMinutes)}m). Please submit your progress report immediately. If overdue for 5 minutes, your attendance will be marked Absent and automatically checked out.`,
           type: "warning",
           link: "/task-management",
           io,
@@ -187,9 +189,10 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
         remindedUsers.add(task.assigned_to);
       }
 
-      // Rule 2: 5-Minute Overdue Report Violation -> Mark Absent & Lock Task
-      // Rule 3: 10-Minute Overdue Report Violation -> Automatically Check Out Shift
-      if (elapsedMinutes >= 5) {
+      // Rule 2: Report Overdue for 5 Minutes (overdueMinutes >= 5, i.e. elapsed >= 10m)
+      // "the report over due 5 mins then the attendence will be marked absent
+      // the employee did not report 5 mints then report over due 5 mins then only locked the attendence and checkout"
+      if (overdueMinutes >= 5) {
         // 1. Immediately apply SLA penalty on the task if not already applied
         if (!task.sla_penalty_applied) {
           await query(
@@ -203,8 +206,7 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
           }
         }
 
-        // At 10 minutes without report: auto check out the attendance session
-        const shouldAutoCheckOut = elapsedMinutes >= 10;
+        const shouldAutoCheckOut = true;
 
         // 2. Fetch employee attendance for today
         const attRes = await query(
@@ -216,16 +218,14 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
         );
 
         let attRecord = attRes.rows[0];
-        const penaltyReason = shouldAutoCheckOut
-          ? `Missed required progress report on task "${task.task_title}" for > 10 minutes. Automatically checked out.`
-          : `Missed required progress report on task "${task.task_title}" for > 5 minutes.`;
+        const penaltyReason = `Progress report on task "${task.task_title}" was overdue for > 5 minutes. Attendance marked Absent and automatically checked out.`;
         let attId = attRecord?.id || `${task.assigned_to}_${today}`;
         const now = new Date();
         const nowIso = now.toISOString();
 
         let totalDayMins = 0;
         let finalSessions = [];
-        let finalCheckout = shouldAutoCheckOut ? nowIso : (attRecord?.check_out || null);
+        let finalCheckout = nowIso;
 
         if (attRecord) {
           penaltyCount++;
@@ -390,16 +390,12 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
           }
         }
 
-        const notifKey = shouldAutoCheckOut ? `auto_checkout_${task.assigned_to}` : `absent_${task.assigned_to}`;
+        const notifKey = `auto_checkout_${task.assigned_to}`;
         if (!penalizedUsers.has(notifKey)) {
           penalizedUsers.add(notifKey);
 
-          const notifTitle = shouldAutoCheckOut
-            ? "Attendance Automatically Checked Out (Absent)"
-            : "Attendance Marked Absent (Report Overdue)";
-          const notifMsg = shouldAutoCheckOut
-            ? `You did not submit a progress report on task "${task.task_title}" for > 10 minutes. Your attendance has been marked Absent and automatically checked out.`
-            : `You did not submit the required progress report on task "${task.task_title}" within 5 minutes. Your attendance has been marked Absent and reporting locked. If unsubmitted for 10 minutes, you will be automatically checked out.`;
+          const notifTitle = "Attendance Marked Absent & Auto Checked Out";
+          const notifMsg = `Your progress report on task "${task.task_title}" was overdue for > 5 minutes. Your attendance has been marked Absent and automatically checked out.`;
 
           await sendNotificationOnce({
             userId: task.assigned_to,
@@ -408,8 +404,8 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
             type: "error",
             link: "/task-management",
             io,
-            activityType: shouldAutoCheckOut ? "auto_checkout_penalty" : "absent_penalty",
-            entityId: `${task.task_id}_${shouldAutoCheckOut ? "checkout" : "absent"}`
+            activityType: "auto_checkout_penalty",
+            entityId: `${task.task_id}_checkout`
           });
 
           // Notification to Company Admins
@@ -422,17 +418,13 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
             for (const admin of adminsRes.rows) {
               await sendNotificationOnce({
                 userId: admin.id,
-                title: shouldAutoCheckOut
-                  ? "Missed Task Report: Employee Auto Checked Out (Absent)"
-                  : "Missed Task Report: Attendance Marked Absent",
-                message: shouldAutoCheckOut
-                  ? `${task.employee_name || "Employee"} did not report on task "${task.task_title}" for > 10 minutes. Attendance marked Absent and automatically checked out.`
-                  : `${task.employee_name || "Employee"} did not report on task "${task.task_title}" within 5 minutes. Attendance marked Absent and task locked.`,
+                title: "Employee Absent & Checked Out (Report Overdue > 5m)",
+                message: `${task.employee_name || "Employee"} did not submit a progress report on task "${task.task_title}" (report overdue for > 5 minutes). Attendance marked Absent and automatically checked out.`,
                 type: "warning",
                 link: "/task-management",
                 io,
-                activityType: shouldAutoCheckOut ? "admin_checkout_alert" : "admin_absent_alert",
-                entityId: `${task.assigned_to}_${task.task_id}_${shouldAutoCheckOut ? "checkout" : "absent"}`
+                activityType: "admin_checkout_alert",
+                entityId: `${task.assigned_to}_${task.task_id}_checkout`
               });
             }
           }
@@ -447,9 +439,9 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
               status: "absent",
               is_admin_locked: true,
               isAttendanceLocked: true,
-              auto_checked_out: shouldAutoCheckOut,
-              check_out: shouldAutoCheckOut ? finalCheckout : attRecord?.check_out || null,
-              checkOutTime: shouldAutoCheckOut ? finalCheckout : attRecord?.check_out || null,
+              auto_checked_out: true,
+              check_out: finalCheckout,
+              checkOutTime: finalCheckout,
               check_in: attRecord?.check_in || null,
               checkInTime: attRecord?.check_in || null,
               sessions: finalSessions,

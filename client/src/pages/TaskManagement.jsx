@@ -341,7 +341,7 @@ export default function TaskManagement() {
 
     if (diff <= 0) {
       const overdueMins = Math.floor(Math.abs(diff) / 60000);
-      if (overdueMins >= 10) {
+      if (overdueMins >= 5) {
         return { isOverdue: true, isLocked: true, text: "Locked (Absent Penalty)" };
       }
       return { isOverdue: true, isLocked: false, text: `Report overdue by ${overdueMins}m` };
@@ -1208,7 +1208,7 @@ export default function TaskManagement() {
                         {isPenalized && (
                           <div className="mb-3 p-2.5 bg-red-500/10 border border-red-500/20 rounded-[12px] flex items-center gap-2 text-[11px] text-red-500 font-semibold">
                             <ShieldAlert size={14} className="flex-shrink-0" />
-                            <span>Task and reporting are locked: no progress report was submitted for &gt; 5 minutes and attendance was marked Absent. If unsubmitted for 10 minutes, attendance is checked out. Contact your Administrator to unlock.</span>
+                            <span>Task and reporting are locked: progress report was overdue for &gt; 5 minutes. Attendance has been marked Absent and automatically checked out. Contact your Administrator to unlock.</span>
                           </div>
                         )}
 
@@ -1221,7 +1221,7 @@ export default function TaskManagement() {
                                 return;
                               }
                               if (isPenalized) {
-                                showToast("Reporting is locked because attendance was marked Absent due to missing reports (> 5m). Please contact Admin to unlock.", "warning");
+                                showToast("Reporting is locked: progress report was overdue for > 5m and attendance was marked Absent & checked out. Please contact Admin.", "warning");
                                 return;
                               }
                               setSelectedTask(task);
@@ -1740,7 +1740,7 @@ export default function TaskManagement() {
               </div>
 
               <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-[12px] text-[11px] text-amber-600 font-medium">
-                <strong>Continuous Compliance Rule:</strong> You must submit a progress report every 5 minutes. If 5 minutes pass without a submission, attendance will be locked as Absent, and at 10 minutes shift will be checked out.
+                <strong>Continuous Compliance Rule:</strong> You must submit a progress report every 5 minutes. If a report is overdue for 5 minutes, your attendance will be locked as Absent and automatically checked out.
               </div>
 
               <div className="flex justify-end gap-3 pt-3">

@@ -2571,7 +2571,7 @@ export default function UserDashboard() {
                   {todayLog?.penalty_status === "unseen_task_penalty"
                     ? <>You did not acknowledge an assigned task within 10 minutes. Your attendance has been marked <strong className="text-red-500">Absent</strong> and check-in is locked for today.</>
                     : todayLog?.penalty_status === "missed_hourly_report_penalty"
-                      ? <>You missed submitting required progress reports (due every 5 mins). Your attendance has been marked <strong className="text-red-500">Absent</strong>{todayLog?.auto_checked_out ? " and shift was automatically checked out after 10 minutes." : " and check-in is locked for today."}</>
+                      ? <>You missed submitting required progress reports (report overdue for &gt; 5 mins). Your attendance has been marked <strong className="text-red-500">Absent</strong>, locked, and shift automatically checked out.</>
                       : <>Your attendance has been marked <strong className="text-red-500">Absent</strong> and check-in is locked for today.</>}
                 </p>
                 {todayLog?.penalty_reason && (
