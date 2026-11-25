@@ -2423,7 +2423,7 @@ export default function UserDashboard() {
           {isAttendanceLocked ? (
             <span className="text-xs font-bold text-red-500 bg-red-500/10 border border-red-500/20 px-3.5 py-2 rounded-[10px] flex items-center gap-1.5 shadow-sm">
               <Lock size={12} />
-              <span>Attendance Locked (Absent)</span>
+              <span>{todayLog?.auto_checked_out ? "Auto Checked Out (Absent)" : "Attendance Locked (Absent)"}</span>
             </span>
           ) : !isCheckedIn && !isCheckedOut && !isOnBreak ? (
             isWithinShiftHours() ? (
@@ -2497,7 +2497,7 @@ export default function UserDashboard() {
                       "bg-brand-primary"
               }`} />
             <span className="text-sm font-extrabold text-text-main">
-              {isAttendanceLocked ? "Marked Absent (Locked)" :
+              {isAttendanceLocked ? (todayLog?.auto_checked_out ? "Auto Checked Out (Absent)" : "Marked Absent (Locked)") :
                 !isCheckedIn && !isCheckedOut && !isOnBreak ? "Not Checked In" :
                   isCheckedIn ? "Active Shift" :
                     isOnBreak ? "On Break" : "Shift Completed"}
@@ -2565,13 +2565,13 @@ export default function UserDashboard() {
                   <Lock size={28} />
                 </div>
                 <h3 className="text-xl font-extrabold text-text-main mb-1.5">
-                  Attendance Marked Absent & Locked
+                  {todayLog?.auto_checked_out ? "Attendance Marked Absent & Auto Checked Out" : "Attendance Marked Absent & Locked"}
                 </h3>
                 <p className="text-xs text-text-sec mb-4 leading-relaxed font-semibold">
                   {todayLog?.penalty_status === "unseen_task_penalty"
                     ? <>You did not acknowledge an assigned task within 10 minutes. Your attendance has been marked <strong className="text-red-500">Absent</strong> and check-in is locked for today.</>
                     : todayLog?.penalty_status === "missed_hourly_report_penalty"
-                      ? <>You missed submitting required progress reports. Your attendance has been marked <strong className="text-red-500">Absent</strong> and check-in is locked for today.</>
+                      ? <>You missed submitting required progress reports (due every 5 mins). Your attendance has been marked <strong className="text-red-500">Absent</strong>{todayLog?.auto_checked_out ? " and shift was automatically checked out after 10 minutes." : " and check-in is locked for today."}</>
                       : <>Your attendance has been marked <strong className="text-red-500">Absent</strong> and check-in is locked for today.</>}
                 </p>
                 {todayLog?.penalty_reason && (

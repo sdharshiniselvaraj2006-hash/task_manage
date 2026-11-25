@@ -673,7 +673,7 @@ export default function TaskManagement() {
               onClick={() => {
                 const unpenalizedTasks = tasks.filter(t => !t.completed && !t.slaPenaltyApplied && !t.sla_penalty_applied);
                 if (unpenalizedTasks.length === 0 && tasks.some(t => !t.completed)) {
-                  showToast("Reporting is locked: all active tasks have missed reports (> 10m). Please contact Admin to unlock.", "warning");
+                  showToast("Reporting is locked: all active tasks have missed reports (> 5m). Please contact Admin to unlock.", "warning");
                   return;
                 }
                 const availableTasks = unpenalizedTasks.filter(t => {
@@ -1208,7 +1208,7 @@ export default function TaskManagement() {
                         {isPenalized && (
                           <div className="mb-3 p-2.5 bg-red-500/10 border border-red-500/20 rounded-[12px] flex items-center gap-2 text-[11px] text-red-500 font-semibold">
                             <ShieldAlert size={14} className="flex-shrink-0" />
-                            <span>Task and reporting are locked: no progress report was submitted for &gt; 10 minutes and attendance was marked Absent. Contact your Administrator to unlock.</span>
+                            <span>Task and reporting are locked: no progress report was submitted for &gt; 5 minutes and attendance was marked Absent. If unsubmitted for 10 minutes, attendance is checked out. Contact your Administrator to unlock.</span>
                           </div>
                         )}
 
@@ -1221,7 +1221,7 @@ export default function TaskManagement() {
                                 return;
                               }
                               if (isPenalized) {
-                                showToast("Reporting is locked because attendance was marked Absent due to missing reports (> 10m). Please contact Admin to unlock.", "warning");
+                                showToast("Reporting is locked because attendance was marked Absent due to missing reports (> 5m). Please contact Admin to unlock.", "warning");
                                 return;
                               }
                               setSelectedTask(task);
@@ -1740,7 +1740,7 @@ export default function TaskManagement() {
               </div>
 
               <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-[12px] text-[11px] text-amber-600 font-medium">
-                <strong>Continuous Compliance Rule:</strong> You must submit a progress report every 5 minutes. If 10 minutes pass without a submission, attendance will be locked as Absent.
+                <strong>Continuous Compliance Rule:</strong> You must submit a progress report every 5 minutes. If 5 minutes pass without a submission, attendance will be locked as Absent, and at 10 minutes shift will be checked out.
               </div>
 
               <div className="flex justify-end gap-3 pt-3">

@@ -82,7 +82,16 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
       LEFT JOIN companies c ON t.company_id = c.id
       WHERE t.status NOT IN ('completed', 'cancelled', 'suspended')
         AND t.assigned_to IS NOT NULL
-        AND (t.sla_penalty_applied IS FALSE OR t.sla_penalty_applied IS NULL)
+        AND (
+          (t.sla_penalty_applied IS FALSE OR t.sla_penalty_applied IS NULL)
+          OR EXISTS (
+            SELECT 1 FROM attendance a 
+            WHERE a.user_id = t.assigned_to 
+              AND a.date >= (CURRENT_DATE - INTERVAL '1 day')
+              AND a.check_in IS NOT NULL 
+              AND a.check_out IS NULL
+          )
+        )
     `;
     const taskParams = [];
     if (targetCompanyId) {
@@ -157,15 +166,13 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
         : new Date(task.assigned_at || task.created_at).getTime();
 
       const elapsedMinutes = Math.floor((Date.now() - baselineTime) / (60 * 1000));
-      // Report cycle is 5 minutes from baseline. Overdue minutes is elapsed minutes after due time:
-      const overdueMinutes = elapsedMinutes - 5;
 
-      // Rule 1: Progress reminder when report is due / overdue (0 to 10 minutes overdue)
-      if (overdueMinutes >= 0 && overdueMinutes < 10 && !remindedUsers.has(task.assigned_to)) {
+      // Rule 1: Progress reminder when report is approaching due (3 to 4 minutes without report)
+      if (elapsedMinutes >= 3 && elapsedMinutes < 5 && !remindedUsers.has(task.assigned_to)) {
         const notifResult = await sendNotificationOnce({
           userId: task.assigned_to,
           title: `Task Progress Report Due: ${task.task_title}`,
-          message: `Your progress report on task "${task.task_title}" is due. Please submit your progress report within 10 minutes to maintain your attendance standing.`,
+          message: `Your progress report on task "${task.task_title}" is due. Please submit your progress report within 5 minutes to prevent attendance being marked Absent.`,
           type: "warning",
           link: "/task-management",
           io,
@@ -180,22 +187,28 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
         remindedUsers.add(task.assigned_to);
       }
 
-      // Rule 2: 10-Minute Overdue Report Violation (overdueMinutes >= 10, i.e. 10 minutes AFTER report is due) -> Auto Check-Out, Mark Absent & Lock Task
-      if (overdueMinutes >= 10) {
-        // 1. Immediately apply SLA penalty and block the task itself
-        await query(
-          `UPDATE tasks SET sla_penalty_applied = TRUE, updated_at = NOW() WHERE id = $1`,
-          [task.task_id]
-        ).catch(() => {});
+      // Rule 2: 5-Minute Overdue Report Violation -> Mark Absent & Lock Task
+      // Rule 3: 10-Minute Overdue Report Violation -> Automatically Check Out Shift
+      if (elapsedMinutes >= 5) {
+        // 1. Immediately apply SLA penalty on the task if not already applied
+        if (!task.sla_penalty_applied) {
+          await query(
+            `UPDATE tasks SET sla_penalty_applied = TRUE, updated_at = NOW() WHERE id = $1`,
+            [task.task_id]
+          ).catch(() => {});
 
-        if (io) {
-          io.to(`user_${task.assigned_to}`).emit("task_updated", { id: task.task_id, sla_penalty_applied: true });
-          io.emit("task_updated", { id: task.task_id, sla_penalty_applied: true });
+          if (io) {
+            io.to(`user_${task.assigned_to}`).emit("task_updated", { id: task.task_id, sla_penalty_applied: true });
+            io.emit("task_updated", { id: task.task_id, sla_penalty_applied: true });
+          }
         }
 
-        // 2. Mark attendance as Absent and automatically check out the employee so timer stops running in background
+        // At 10 minutes without report: auto check out the attendance session
+        const shouldAutoCheckOut = elapsedMinutes >= 10;
+
+        // 2. Fetch employee attendance for today
         const attRes = await query(
-          `SELECT id, status, is_admin_locked, penalty_status, check_in, check_out, breaks, sessions, accumulated_working_minutes, duration_minutes 
+          `SELECT id, status, is_admin_locked, penalty_status, check_in, check_out, breaks, sessions, accumulated_working_minutes, duration_minutes, auto_checked_out
            FROM attendance 
            WHERE user_id = $1 AND date = $2
            ORDER BY check_in DESC NULLS LAST, created_at DESC LIMIT 1`,
@@ -203,14 +216,16 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
         );
 
         let attRecord = attRes.rows[0];
-        const penaltyReason = `Missed required progress report on task "${task.task_title}" for > 10 minutes after due time.`;
+        const penaltyReason = shouldAutoCheckOut
+          ? `Missed required progress report on task "${task.task_title}" for > 10 minutes. Automatically checked out.`
+          : `Missed required progress report on task "${task.task_title}" for > 5 minutes.`;
         let attId = attRecord?.id || `${task.assigned_to}_${today}`;
         const now = new Date();
         const nowIso = now.toISOString();
 
         let totalDayMins = 0;
         let finalSessions = [];
-        let finalCheckout = nowIso;
+        let finalCheckout = shouldAutoCheckOut ? nowIso : (attRecord?.check_out || null);
 
         if (attRecord) {
           penaltyCount++;
@@ -221,10 +236,12 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
             if (b.start && b.end) {
               totalBreakMinutes += Math.max(0, Math.floor((new Date(b.end) - new Date(b.start)) / 60000));
             } else if (b.start && !b.end) {
-              b.end = nowIso;
-              const dur = Math.max(0, Math.floor((now.getTime() - new Date(b.start).getTime()) / 60000));
-              b.durationMinutes = dur;
-              totalBreakMinutes += dur;
+              if (shouldAutoCheckOut) {
+                b.end = nowIso;
+                const dur = Math.max(0, Math.floor((now.getTime() - new Date(b.start).getTime()) / 60000));
+                b.durationMinutes = dur;
+                totalBreakMinutes += dur;
+              }
             }
           });
 
@@ -243,8 +260,10 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
             let cOut = s.checkOut;
             let dur = Number(s.durationMinutes) || 0;
             if (!cOut) {
-              cOut = nowIso;
-              dur = Math.max(1, Math.floor((now.getTime() - inMs) / 60000) - totalBreakMinutes);
+              if (shouldAutoCheckOut) {
+                cOut = nowIso;
+                dur = Math.max(1, Math.floor((now.getTime() - inMs) / 60000) - totalBreakMinutes);
+              }
             } else if (dur <= 0 && s.checkOut) {
               dur = Math.max(1, Math.floor((new Date(s.checkOut).getTime() - inMs) / 60000));
             }
@@ -253,7 +272,9 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
               checkOut: cOut,
               durationMinutes: dur
             });
-            computedTotalDayMins += dur;
+            if (cOut) {
+              computedTotalDayMins += dur;
+            }
           });
 
           // If cleanSessions had no sessions but check_in exists, record it
@@ -270,35 +291,53 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
             cleanSessions.push({
               sessionId: `sess_${inMs}_1`,
               checkIn: new Date(attRecord.check_in).toISOString(),
-              checkOut: nowIso,
+              checkOut: shouldAutoCheckOut ? nowIso : (attRecord.check_out || null),
               durationMinutes: dur,
               breaks
             });
-            computedTotalDayMins = dur;
+            if (shouldAutoCheckOut || attRecord.check_out) {
+              computedTotalDayMins = dur;
+            }
           }
 
-          totalDayMins = Math.min(1440, computedTotalDayMins);
+          totalDayMins = Math.min(1440, computedTotalDayMins || attRecord.duration_minutes || 0);
           finalSessions = cleanSessions;
-          finalCheckout = nowIso;
+          finalCheckout = shouldAutoCheckOut ? (attRecord.check_out || nowIso) : (attRecord.check_out || null);
 
-          await query(
-            `UPDATE attendance
-             SET status = 'absent',
-                 check_out = $1,
-                 auto_checked_out = TRUE,
-                 penalty_status = COALESCE(penalty_status, 'missed_hourly_report_penalty'),
-                 is_admin_locked = TRUE,
-                 penalty_applied_at = NOW(),
-                 penalty_reason = COALESCE(penalty_reason, $2),
-                 penalized_by_task_id = COALESCE(penalized_by_task_id, $3),
-                 duration_minutes = $4,
-                 accumulated_working_minutes = $4,
-                 sessions = $5,
-                 breaks = $6,
-                 updated_at = NOW()
-             WHERE id = $7`,
-            [finalCheckout, penaltyReason, task.task_id, totalDayMins, JSON.stringify(sessions), JSON.stringify(breaks), attId]
-          );
+          if (shouldAutoCheckOut) {
+            await query(
+              `UPDATE attendance
+               SET status = 'absent',
+                   check_out = COALESCE(check_out, $1),
+                   auto_checked_out = TRUE,
+                   penalty_status = COALESCE(penalty_status, 'missed_hourly_report_penalty'),
+                   is_admin_locked = TRUE,
+                   penalty_applied_at = COALESCE(penalty_applied_at, NOW()),
+                   penalty_reason = $2,
+                   penalized_by_task_id = COALESCE(penalized_by_task_id, $3),
+                   duration_minutes = $4,
+                   accumulated_working_minutes = $4,
+                   sessions = $5,
+                   breaks = $6,
+                   updated_at = NOW()
+               WHERE id = $7`,
+              [finalCheckout, penaltyReason, task.task_id, totalDayMins, JSON.stringify(finalSessions), JSON.stringify(breaks), attId]
+            );
+          } else {
+            // At 5 minutes: Mark absent & lock, but do not check-out until 10 minutes
+            await query(
+              `UPDATE attendance
+               SET status = 'absent',
+                   penalty_status = COALESCE(penalty_status, 'missed_hourly_report_penalty'),
+                   is_admin_locked = TRUE,
+                   penalty_applied_at = COALESCE(penalty_applied_at, NOW()),
+                   penalty_reason = $1,
+                   penalized_by_task_id = COALESCE(penalized_by_task_id, $2),
+                   updated_at = NOW()
+               WHERE id = $3`,
+              [penaltyReason, task.task_id, attId]
+            );
+          }
 
           // Clean up any extra duplicate rows for this user on this day
           await query(
@@ -308,44 +347,72 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
         } else {
           penaltyCount++;
           attId = `${task.assigned_to}_${today}`;
-          await query(
-            `INSERT INTO attendance (
-              id, user_id, company_id, date, status, check_out, auto_checked_out, penalty_status,
-              is_admin_locked, penalty_applied_at, penalty_reason, penalized_by_task_id,
-              duration_minutes, accumulated_working_minutes, sessions, breaks,
-              created_at, updated_at
-            )
-            VALUES ($1, $2, $3, $4, 'absent', NOW(), TRUE, 'missed_hourly_report_penalty', TRUE, NOW(), $5, $6, 0, 0, '[]'::jsonb, '[]'::jsonb, NOW(), NOW())
-            ON CONFLICT (id) DO UPDATE SET
-              status = 'absent',
-              check_out = COALESCE(attendance.check_out, NOW()),
-              auto_checked_out = TRUE,
-              penalty_status = 'missed_hourly_report_penalty',
-              is_admin_locked = TRUE,
-              penalty_applied_at = NOW(),
-              penalty_reason = EXCLUDED.penalty_reason,
-              penalized_by_task_id = EXCLUDED.penalized_by_task_id,
-              updated_at = NOW()`,
-            [attId, task.assigned_to, task.company_id, today, penaltyReason, task.task_id]
-          );
+          if (shouldAutoCheckOut) {
+            await query(
+              `INSERT INTO attendance (
+                id, user_id, company_id, date, status, check_out, auto_checked_out, penalty_status,
+                is_admin_locked, penalty_applied_at, penalty_reason, penalized_by_task_id,
+                duration_minutes, accumulated_working_minutes, sessions, breaks,
+                created_at, updated_at
+              )
+              VALUES ($1, $2, $3, $4, 'absent', NOW(), TRUE, 'missed_hourly_report_penalty', TRUE, NOW(), $5, $6, 0, 0, '[]'::jsonb, '[]'::jsonb, NOW(), NOW())
+              ON CONFLICT (id) DO UPDATE SET
+                status = 'absent',
+                check_out = COALESCE(attendance.check_out, NOW()),
+                auto_checked_out = TRUE,
+                penalty_status = 'missed_hourly_report_penalty',
+                is_admin_locked = TRUE,
+                penalty_applied_at = NOW(),
+                penalty_reason = EXCLUDED.penalty_reason,
+                penalized_by_task_id = EXCLUDED.penalized_by_task_id,
+                updated_at = NOW()`,
+              [attId, task.assigned_to, task.company_id, today, penaltyReason, task.task_id]
+            );
+          } else {
+            await query(
+              `INSERT INTO attendance (
+                id, user_id, company_id, date, status, penalty_status,
+                is_admin_locked, penalty_applied_at, penalty_reason, penalized_by_task_id,
+                duration_minutes, accumulated_working_minutes, sessions, breaks,
+                created_at, updated_at
+              )
+              VALUES ($1, $2, $3, $4, 'absent', 'missed_hourly_report_penalty', TRUE, NOW(), $5, $6, 0, 0, '[]'::jsonb, '[]'::jsonb, NOW(), NOW())
+              ON CONFLICT (id) DO UPDATE SET
+                status = 'absent',
+                penalty_status = 'missed_hourly_report_penalty',
+                is_admin_locked = TRUE,
+                penalty_applied_at = NOW(),
+                penalty_reason = EXCLUDED.penalty_reason,
+                penalized_by_task_id = EXCLUDED.penalized_by_task_id,
+                updated_at = NOW()`,
+              [attId, task.assigned_to, task.company_id, today, penaltyReason, task.task_id]
+            );
+          }
         }
 
-        if (!penalizedUsers.has(task.assigned_to)) {
-          penalizedUsers.add(task.assigned_to);
+        const notifKey = shouldAutoCheckOut ? `auto_checkout_${task.assigned_to}` : `absent_${task.assigned_to}`;
+        if (!penalizedUsers.has(notifKey)) {
+          penalizedUsers.add(notifKey);
 
-          // Exactly ONE notification to employee for marking absent
+          const notifTitle = shouldAutoCheckOut
+            ? "Attendance Automatically Checked Out (Absent)"
+            : "Attendance Marked Absent (Report Overdue)";
+          const notifMsg = shouldAutoCheckOut
+            ? `You did not submit a progress report on task "${task.task_title}" for > 10 minutes. Your attendance has been marked Absent and automatically checked out.`
+            : `You did not submit the required progress report on task "${task.task_title}" within 5 minutes. Your attendance has been marked Absent and reporting locked. If unsubmitted for 10 minutes, you will be automatically checked out.`;
+
           await sendNotificationOnce({
             userId: task.assigned_to,
-            title: "Attendance Marked Absent (Missed Task Report)",
-            message: `You did not submit the required progress report on task "${task.task_title}" within 10 minutes of it being due. Your attendance has been marked Absent and task actions locked. Contact your Admin to resolve.`,
+            title: notifTitle,
+            message: notifMsg,
             type: "error",
             link: "/task-management",
             io,
-            activityType: "absent_penalty",
-            entityId: task.task_id
+            activityType: shouldAutoCheckOut ? "auto_checkout_penalty" : "absent_penalty",
+            entityId: `${task.task_id}_${shouldAutoCheckOut ? "checkout" : "absent"}`
           });
 
-          // Exactly ONE notification to Company Admins per employee absent
+          // Notification to Company Admins
           if (task.company_id) {
             const adminsRes = await query(
               `SELECT id FROM users WHERE company_id = $1 AND role IN ('admin', 'superadmin')`,
@@ -355,18 +422,22 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
             for (const admin of adminsRes.rows) {
               await sendNotificationOnce({
                 userId: admin.id,
-                title: "Missed Task Report: Attendance Marked Absent",
-                message: `${task.employee_name || "Employee"} did not report on task "${task.task_title}" within 10 minutes of due time. Attendance automatically marked Absent and task locked.`,
+                title: shouldAutoCheckOut
+                  ? "Missed Task Report: Employee Auto Checked Out (Absent)"
+                  : "Missed Task Report: Attendance Marked Absent",
+                message: shouldAutoCheckOut
+                  ? `${task.employee_name || "Employee"} did not report on task "${task.task_title}" for > 10 minutes. Attendance marked Absent and automatically checked out.`
+                  : `${task.employee_name || "Employee"} did not report on task "${task.task_title}" within 5 minutes. Attendance marked Absent and task locked.`,
                 type: "warning",
                 link: "/task-management",
                 io,
-                activityType: "admin_absent_alert",
-                entityId: `${task.assigned_to}_${task.task_id}`
+                activityType: shouldAutoCheckOut ? "admin_checkout_alert" : "admin_absent_alert",
+                entityId: `${task.assigned_to}_${task.task_id}_${shouldAutoCheckOut ? "checkout" : "absent"}`
               });
             }
           }
 
-          // Socket.IO Alert
+          // Socket.IO Real-Time Broadcast
           if (io) {
             const payload = {
               attendanceId: attId,
@@ -376,9 +447,9 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
               status: "absent",
               is_admin_locked: true,
               isAttendanceLocked: true,
-              auto_checked_out: true,
-              check_out: finalCheckout,
-              checkOutTime: finalCheckout,
+              auto_checked_out: shouldAutoCheckOut,
+              check_out: shouldAutoCheckOut ? finalCheckout : attRecord?.check_out || null,
+              checkOutTime: shouldAutoCheckOut ? finalCheckout : attRecord?.check_out || null,
               check_in: attRecord?.check_in || null,
               checkInTime: attRecord?.check_in || null,
               sessions: finalSessions,
