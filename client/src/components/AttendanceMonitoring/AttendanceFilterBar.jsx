@@ -65,11 +65,19 @@ export default function AttendanceFilterBar({
     { value: "Absent", label: "Absent" },
     { value: "Half Day", label: "Half Day" },
     { value: "On Leave", label: "On Leave" },
+    { value: "regularization", label: "Pending Regularization" },
     { value: "Holiday", label: "Holiday" },
     { value: "Weekly Off", label: "Weekly Off" },
     { value: "Pending", label: "Pending" },
     { value: "Attendance Locked", label: "Locked" }
   ];
+
+  const hasActiveFilters = status !== "all" || department !== "all" || searchQuery !== "";
+  const clearAllFilters = () => {
+    setStatus("all");
+    setDepartment("all");
+    setSearchQuery("");
+  };
 
   const formattedRefreshTime = refreshTimestamp
     ? (typeof refreshTimestamp === "string" && refreshTimestamp.includes(":") && !refreshTimestamp.includes("T")
@@ -103,8 +111,20 @@ export default function AttendanceFilterBar({
           </div>
         </div>
 
-        {/* Refresh & Last Updated Timestamp */}
-        <div className="flex items-center gap-3 ml-auto">
+        {/* Clear Filter & Refresh Controls */}
+        <div className="flex items-center gap-2.5 ml-auto">
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-[10px] text-xs font-semibold cursor-pointer transition-all"
+              title="Clear all active filters"
+            >
+              <X size={13} />
+              <span>Clear Filter</span>
+            </button>
+          )}
+
           <div className="flex items-center gap-1.5 text-[11px] font-semibold text-text-mut">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <span>Updated: <strong className="text-text-sec">{formattedRefreshTime}</strong></span>

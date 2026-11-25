@@ -1055,6 +1055,11 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
           return attStatusLower === "pending" || rawStatusLower === "pending";
         }
 
+        // "regularization" or "pending regularization"
+        if (sLower === "regularization" || sLower === "pending regularization" || sLower === "pending_regularization") {
+          return Boolean(r.regularizationId || (r.regularizationStatus && r.regularizationStatus.toLowerCase() === "pending"));
+        }
+
         // Exact fallback match
         return attStatusLower === sLower || rawStatusLower === sLower;
       });

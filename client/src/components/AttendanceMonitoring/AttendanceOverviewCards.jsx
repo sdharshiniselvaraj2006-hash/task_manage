@@ -12,7 +12,14 @@ import {
   RefreshCw
 } from 'lucide-react';
 
-export default function AttendanceOverviewCards({ summary = {}, loading = false, error = null, onRetry, onCardClick }) {
+export default function AttendanceOverviewCards({
+  summary = {},
+  loading = false,
+  error = null,
+  onRetry,
+  onCardClick,
+  activeStatus = "all"
+}) {
   const s = summary || {};
   const isLoaded = !loading && !error && summary !== null;
 
@@ -131,16 +138,29 @@ export default function AttendanceOverviewCards({ summary = {}, loading = false,
       <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-4">
         {cards.map((c) => {
           const Icon = c.icon;
+          const isSelected = activeStatus
+            ? (activeStatus.toLowerCase() === c.statusKey.toLowerCase() || (c.id === "total" && (activeStatus === "all" || !activeStatus)))
+            : c.id === "total";
+
           return (
             <div
               key={c.id}
               onClick={() => onCardClick && onCardClick(c.statusKey, c.id)}
-              className={`bg-bg-card p-4 sm:p-5 rounded-[20px] border ${c.borderColor} shadow-sm hover:shadow-md transition-all flex flex-col justify-between cursor-pointer group`}
+              className={`bg-bg-card p-4 sm:p-5 rounded-[20px] border shadow-sm hover:shadow-md transition-all flex flex-col justify-between cursor-pointer group ${
+                isSelected
+                  ? "border-purple-500/80 ring-2 ring-purple-500/30 bg-purple-950/10 shadow-purple-950/20"
+                  : `${c.borderColor} hover:border-zinc-700`
+              }`}
             >
               <div className="flex items-center justify-between mb-3">
-                <span className="text-[10px] sm:text-xs font-bold text-text-sec uppercase tracking-wider truncate group-hover:text-text-main transition-colors">
-                  {c.label}
-                </span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0 animate-pulse" />}
+                  <span className={`text-[10px] sm:text-xs font-bold uppercase tracking-wider truncate transition-colors ${
+                    isSelected ? "text-purple-300" : "text-text-sec group-hover:text-text-main"
+                  }`}>
+                    {c.label}
+                  </span>
+                </div>
                 <div className={`w-8 h-8 rounded-[10px] ${c.bgColor} ${c.color} flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform`}>
                   <Icon size={18} />
                 </div>
