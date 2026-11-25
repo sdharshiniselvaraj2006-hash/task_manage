@@ -74,8 +74,8 @@ import { formatDisplayDate, calculateLeaveDuration, getCleanDateOnly, hasDateOve
 
 
 const numberToWords = (num) => {
-  const a = ['','one ','two ','three ','four ', 'five ','six ','seven ','eight ','nine ','ten ','eleven ','twelve ','thirteen ','fourteen ','fifteen ','sixteen ','seventeen ','eighteen ','nineteen '];
-  const b = ['', '', 'twenty','thirty','forty','fifty', 'sixty','seventy','eighty','ninety'];
+  const a = ['', 'one ', 'two ', 'three ', 'four ', 'five ', 'six ', 'seven ', 'eight ', 'nine ', 'ten ', 'eleven ', 'twelve ', 'thirteen ', 'fourteen ', 'fifteen ', 'sixteen ', 'seventeen ', 'eighteen ', 'nineteen '];
+  const b = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
   if (!num && num !== 0) return '';
   num = Math.round(Number(num));
   if ((num = num.toString()).length > 9) return 'overflow';
@@ -141,7 +141,7 @@ export default function UserDashboard() {
               }
             }
           }
-        } catch(e) { console.warn("Failed to load env config", e); }
+        } catch (e) { console.warn("Failed to load env config", e); }
       }
     };
     fetchEnv();
@@ -195,7 +195,7 @@ export default function UserDashboard() {
   useEffect(() => {
     if (currentUser?.companyId) {
       const unsub = listenToCompany(currentUser.companyId, (data) => {
-        if(data) {
+        if (data) {
           setCompanyName(data.name || "ZUNA HRMS");
           setCompanyLogo(data.logoBase64 || "");
           setCompanyAddress(data.address || "");
@@ -246,29 +246,29 @@ export default function UserDashboard() {
   const toastShownRef = useRef(false);
 
   const isAttendanceLocked = !!(todayLog && (
-    todayLog.is_admin_locked === true || 
-    Boolean(todayLog.penalty_status) || 
+    todayLog.is_admin_locked === true ||
+    Boolean(todayLog.penalty_status) ||
     todayLog.status === "absent"
   ));
   const isCheckedOut = !isAttendanceLocked && !!(todayLog && (
-    todayLog.status === "checked-out" || 
-    todayLog.status === "completed" || 
+    todayLog.status === "checked-out" ||
+    todayLog.status === "completed" ||
     (Boolean(todayLog.check_out) && todayLog.status !== "checked-in" && todayLog.status !== "present")
   ));
   const isOnBreak = !isAttendanceLocked && !isCheckedOut && !!(todayLog && (
-    todayLog.status === "on-break" || 
+    todayLog.status === "on-break" ||
     (Array.isArray(todayLog.breaks) && todayLog.breaks.some(b => !b.end && !b.resumeTime))
   ));
   const isCheckedIn = !isAttendanceLocked && !isOnBreak && !isCheckedOut && !!(todayLog && (
-    todayLog.status === "checked-in" || 
-    todayLog.status === "in-progress" || 
-    todayLog.status === "present" || 
+    todayLog.status === "checked-in" ||
+    todayLog.status === "in-progress" ||
+    todayLog.status === "present" ||
     (Boolean(todayLog.check_in) && !todayLog.check_out)
   ));
 
   const getElapsedWorkingMs = () => {
     if (!todayLog) return 0;
-    
+
     // If today is checked out OR attendance is locked/absent/auto-checked-out,
     // freeze duration immediately at total completed duration and NEVER use currentTime
     if (isCheckedOut || isAttendanceLocked || todayLog.status === "absent" || todayLog.auto_checked_out) {
@@ -350,7 +350,7 @@ export default function UserDashboard() {
     if (isNaN(checkInDate.getTime())) return accumulatedMs;
 
     const sessionElapsedMs = Math.max(0, currentTime.getTime() - checkInDate.getTime());
-    
+
     let breakMs = 0;
     if (currentSessionBreaks && currentSessionBreaks.length > 0) {
       currentSessionBreaks.forEach(b => {
@@ -365,7 +365,7 @@ export default function UserDashboard() {
         }
       });
     }
-    
+
     const currentSessionWorkingMs = Math.max(0, sessionElapsedMs - breakMs);
     return accumulatedMs + currentSessionWorkingMs;
   };
@@ -403,18 +403,18 @@ export default function UserDashboard() {
     if (loading) return false;
     if (currentUser.role === "admin") return false;
     if (todayLog || isCheckedIn || isCheckedOut || isAttendanceLocked) return false;
-    
+
     // Check if today is a weekday
     const day = currentTime.getDay();
     const isWeekday = day >= 1 && day <= 5;
     if (!isWeekday) return false;
-    
+
     // Parse shiftStart (e.g. "10:00")
     if (!currentUser?.shiftStart) return false;
     const [startH, startM] = String(currentUser.shiftStart).split(":").map(Number);
     const shiftStartToday = new Date(currentTime);
     shiftStartToday.setHours(startH, startM, 0, 0);
-    
+
     return currentTime > shiftStartToday && isWithinShiftHours();
   })();
 
@@ -489,13 +489,13 @@ export default function UserDashboard() {
     const unsubscribeLeaves = subscribeToLeaveRequests(currentUser.companyId, (list) => {
       const items = Array.isArray(list) ? list : [];
       setMyLeaveRequests(items.filter(r => (r.userId || r.user_id) === currentUser.uid));
-      
+
       const todayStr = getLocalDateString();
-      const deptOnLeave = items.filter(r => 
-        r.status === "approved" && 
-        (r.userDept || r.department) === currentUser.department && 
+      const deptOnLeave = items.filter(r =>
+        r.status === "approved" &&
+        (r.userDept || r.department) === currentUser.department &&
         (r.userId || r.user_id) !== currentUser.uid &&
-        r.startDate <= todayStr && 
+        r.startDate <= todayStr &&
         r.endDate >= todayStr
       );
       setTeamOnLeaveCount(deptOnLeave.length);
@@ -506,14 +506,14 @@ export default function UserDashboard() {
           if (fresh && fresh.id) {
             updateCurrentUserState(fresh);
           }
-        }).catch(() => {});
+        }).catch(() => { });
       }
     });
 
     getAllRegisteredUsers(currentUser.companyId).then(usersList => {
       const deptUsers = usersList.filter(u => u.department === currentUser.department && u.uid !== currentUser.uid && u.role !== "admin");
       setTeamMembers(deptUsers);
-      
+
       const todayDate = new Date();
       const tomorrowDate = new Date();
       tomorrowDate.setDate(tomorrowDate.getDate() + 1);
@@ -597,8 +597,8 @@ export default function UserDashboard() {
       setBreakTotalSeconds(totalSeconds);
 
       const startTime = activeBreak ? new Date(activeBreak.start || activeBreak.startTime).getTime() : Date.now();
-      const endTime = todayLog.currentBreakTimerEnd 
-        ? new Date(todayLog.currentBreakTimerEnd).getTime() 
+      const endTime = todayLog.currentBreakTimerEnd
+        ? new Date(todayLog.currentBreakTimerEnd).getTime()
         : (startTime + totalSeconds * 1000);
 
       const updateTimer = () => {
@@ -877,7 +877,6 @@ export default function UserDashboard() {
         if (res) {
           setTodayLog(res);
         }
-        window.dispatchEvent(new Event("attendance-updated"));
         showToast("Biometric verification verified! Checked in successfully.", "success");
       } else {
         const res = await checkOut(currentUser, biometricModal.location, verifyRes.verificationSessionToken);
@@ -885,7 +884,6 @@ export default function UserDashboard() {
           setTodayLog(res);
         }
         setUserTasks(prev => (prev || []).map(t => ({ ...t, timerStartedAt: null })));
-        window.dispatchEvent(new Event("attendance-updated"));
         showToast("Biometric verification verified! Checked out successfully.", "success");
       }
 
@@ -1033,7 +1031,7 @@ export default function UserDashboard() {
         if (currentUser?.uid && typeof updateCurrentUserState === "function") {
           apiFetch(`/users/${currentUser.uid}`).then(fresh => {
             if (fresh && fresh.id) updateCurrentUserState(fresh);
-          }).catch(() => {});
+          }).catch(() => { });
         }
       }
       showToast("Leave request submitted successfully.", "success");
@@ -1275,28 +1273,28 @@ export default function UserDashboard() {
   const recentActivities = getRecentActivitiesList();
 
   if (loading) {
-    
-  const handleDownloadPayslip = () => {
-    const element = document.getElementById('payslip-content');
-    const opt = {
-      margin:       0.5,
-      filename:     `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2 },
-      jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+
+    const handleDownloadPayslip = () => {
+      const element = document.getElementById('payslip-content');
+      const opt = {
+        margin: 0.5,
+        filename: `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+      };
+      html2pdf().set(opt).from(element).save();
     };
-    html2pdf().set(opt).from(element).save();
-  };
 
-  if (!currentUser) {
+    if (!currentUser) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+        </div>
+      );
+    }
+
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
-      </div>
-    );
-  }
-
-  return (
       <div className="space-y-5 sm:space-y-8 w-full max-w-[1400px] mx-auto text-left animate-fade-in">
         {/* Welcome Panel Skeleton */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -1337,28 +1335,28 @@ export default function UserDashboard() {
   }
 
   if (activeTab === "payslips") {
-    
-  const handleDownloadPayslip = () => {
-    const element = document.getElementById('payslip-content');
-    const opt = {
-      margin:       0.5,
-      filename:     `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2 },
-      jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+
+    const handleDownloadPayslip = () => {
+      const element = document.getElementById('payslip-content');
+      const opt = {
+        margin: 0.5,
+        filename: `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+      };
+      html2pdf().set(opt).from(element).save();
     };
-    html2pdf().set(opt).from(element).save();
-  };
 
-  if (!currentUser) {
+    if (!currentUser) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+        </div>
+      );
+    }
+
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
-      </div>
-    );
-  }
-
-  return (
       <div className="space-y-6 w-full max-w-[1400px] mx-auto text-left animate-fade-in">
         {/* Breadcrumb & Header */}
         <div className="mb-6">
@@ -1384,7 +1382,7 @@ export default function UserDashboard() {
                 const special = gross - basic - hra;
                 const pf = basic * 0.12;
                 const esi = gross <= 21000 ? gross * 0.0075 : 0;
-                
+
                 const getPTDeduction = (g) => {
                   if (g <= 21000) return 0;
                   if (g <= 30000) return Math.round((180 / 6) * 100) / 100;
@@ -1415,13 +1413,13 @@ export default function UserDashboard() {
                       </div>
                     </div>
                   </div>
-                  
+
                   <div className="space-y-4 flex-grow z-10">
                     <div>
                       <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block mb-1">Net Payable</span>
                       <span className="text-2xl font-extrabold text-emerald-500 flex items-center gap-1"><IndianRupee size={20} /> {(payslip.net !== undefined ? payslip.net : calc.net).toLocaleString('en-IN')}</span>
                     </div>
-                    
+
                     <div className="grid grid-cols-2 gap-4 border-t border-border-card pt-4 mt-4">
                       <div>
                         <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block mb-1">Gross Salary</span>
@@ -1435,13 +1433,13 @@ export default function UserDashboard() {
                   </div>
 
                   <div className="pt-6 mt-6 border-t border-border-card z-10">
-                    <button 
+                    <button
                       onClick={() => {
-                        setSelectedPayslip({ 
-                          ...calc, 
-                          ...payslip, 
-                          gross: payslip.grossSalary || payslip.gross || calc.gross, 
-                          net: payslip.netSalary || payslip.net || calc.net 
+                        setSelectedPayslip({
+                          ...calc,
+                          ...payslip,
+                          gross: payslip.grossSalary || payslip.gross || calc.gross,
+                          net: payslip.netSalary || payslip.net || calc.net
                         });
                         setShowPayslipModal(true);
                       }}
@@ -1486,11 +1484,11 @@ export default function UserDashboard() {
                 <div className="text-center mb-4 -mt-4">
                   {companyAddress && <p className="text-[11px] font-bold text-black mt-1 whitespace-pre-wrap">{companyAddress}</p>}
                 </div>
-                
+
                 <div className="text-center mb-2 mt-4">
                   <h2 className="text-xl font-extrabold text-black tracking-wider uppercase">PAYSLIP</h2>
                 </div>
-                
+
                 <div className="border-t-[3px] border-black w-full my-2"></div>
 
                 <div className="text-center mb-2 mt-2">
@@ -1498,7 +1496,7 @@ export default function UserDashboard() {
                 </div>
 
                 <div className="border-t-[3px] border-black w-full mb-4"></div>
-                
+
                 {/* Employee Info Grid */}
                 <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-[10px] font-normal text-black mb-4">
                   {/* Left Column */}
@@ -1536,7 +1534,7 @@ export default function UserDashboard() {
                   <div className="col-span-3 pl-4">Deductions</div>
                   <div className="col-span-1 text-right">Amount</div>
                 </div>
-                
+
                 <div className="border-t-[3px] border-black w-full mb-3"></div>
 
                 <div className="grid grid-cols-12 gap-y-1 gap-x-2 text-[10px] text-black pb-4 font-normal">
@@ -1561,9 +1559,9 @@ export default function UserDashboard() {
                   <div className="col-span-3 pl-4">Loss of Pay</div>
                   <div className="col-span-1 text-right">{(selectedPayslip.lopAmount || 0).toFixed(2)}</div>
                 </div>
-                
+
                 <div className="border-t-[3px] border-black w-full my-1"></div>
-                
+
                 <div className="grid grid-cols-12 gap-2 text-[10px] font-extrabold text-black py-1">
                   <div className="col-span-4">Gross Earning</div>
                   <div className="col-span-2 text-right">{(selectedPayslip.grossSalary || 0).toFixed(2)}</div>
@@ -1578,15 +1576,15 @@ export default function UserDashboard() {
                   <div className="col-span-4">Net Amount</div>
                   <div className="col-span-2 text-right">{(selectedPayslip.net || 0).toFixed(2)}</div>
                 </div>
-                
+
                 <div className="text-[10px] text-black mb-4 font-normal">
                   Net Amount in words: ( {numberToWords(selectedPayslip.net || 0).toUpperCase()} ONLY )
                 </div>
-                
+
                 <div className="text-[10px] font-extrabold text-black mb-12">
                   Disclaimer: This is a system generated payslip, does not require any signature.
                 </div>
-                
+
                 {/* Footer Logo */}
                 <div className="mt-12 flex justify-center items-center gap-2 pb-2">
                   <span className="text-[11px] font-extrabold text-black">Powered by</span>
@@ -1596,18 +1594,18 @@ export default function UserDashboard() {
               </div>
               <div className="px-6 py-4 border-t border-border-card flex justify-end gap-3 bg-bg-base/30 mt-auto flex-shrink-0">
                 <button onClick={() => setShowPayslipModal(false)} className="px-5 py-2.5 rounded-[12px] text-xs font-bold text-text-sec hover:bg-bg-base transition-colors border border-transparent hover:border-border-card">Close</button>
-                <button 
+                <button
                   onClick={() => {
-                                        const element = document.getElementById('payslip-content');
+                    const element = document.getElementById('payslip-content');
                     const opt = {
-                      margin:       0,
-                      filename:     `Payslip_${selectedPayslip.month}_${selectedPayslip.year}.pdf`,
-                      image:        { type: 'jpeg', quality: 0.98 },
-                      html2canvas:  { scale: 2, useCORS: true },
-                      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+                      margin: 0,
+                      filename: `Payslip_${selectedPayslip.month}_${selectedPayslip.year}.pdf`,
+                      image: { type: 'jpeg', quality: 0.98 },
+                      html2canvas: { scale: 2, useCORS: true },
+                      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
                     };
-                    html2pdf().set(opt).from(element).save(); 
-                  }} 
+                    html2pdf().set(opt).from(element).save();
+                  }}
                   className="px-6 py-2.5 flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-[12px] text-xs font-bold shadow-lg shadow-emerald-500/20 transition-all active:scale-95 cursor-pointer"
                 >
                   <Download size={14} /> Download PDF
@@ -1622,28 +1620,28 @@ export default function UserDashboard() {
   }
 
   if (activeTab === "assets") {
-    
-  const handleDownloadPayslip = () => {
-    const element = document.getElementById('payslip-content');
-    const opt = {
-      margin:       0.5,
-      filename:     `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2 },
-      jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+
+    const handleDownloadPayslip = () => {
+      const element = document.getElementById('payslip-content');
+      const opt = {
+        margin: 0.5,
+        filename: `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+      };
+      html2pdf().set(opt).from(element).save();
     };
-    html2pdf().set(opt).from(element).save();
-  };
 
-  if (!currentUser) {
+    if (!currentUser) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+        </div>
+      );
+    }
+
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
-      </div>
-    );
-  }
-
-  return (
       <div className="space-y-6 w-full max-w-[1400px] mx-auto text-left animate-fade-in">
         {/* Breadcrumb & Header */}
         <div className="mb-6">
@@ -1674,28 +1672,28 @@ export default function UserDashboard() {
                 statusColor = "bg-amber-500/10 text-amber-500 border border-amber-500/20";
               }
 
-              
-  const handleDownloadPayslip = () => {
-    const element = document.getElementById('payslip-content');
-    const opt = {
-      margin:       0.5,
-      filename:     `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2 },
-      jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
-    };
-    html2pdf().set(opt).from(element).save();
-  };
 
-  if (!currentUser) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
-      </div>
-    );
-  }
+              const handleDownloadPayslip = () => {
+                const element = document.getElementById('payslip-content');
+                const opt = {
+                  margin: 0.5,
+                  filename: `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
+                  image: { type: 'jpeg', quality: 0.98 },
+                  html2canvas: { scale: 2 },
+                  jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+                };
+                html2pdf().set(opt).from(element).save();
+              };
 
-  return (
+              if (!currentUser) {
+                return (
+                  <div className="flex items-center justify-center min-h-[400px]">
+                    <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+                  </div>
+                );
+              }
+
+              return (
                 <div key={asset.id} className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow relative overflow-hidden">
                   <div className="flex justify-between items-start gap-4 mb-4">
                     <div>
@@ -1744,28 +1742,28 @@ export default function UserDashboard() {
     const paginatedLeaveRequests = myLeaveRequests.slice(leavesStartIndex, leavesStartIndex + 10);
     const leavesTotalPages = Math.ceil(myLeaveRequests.length / 10) || 1;
 
-    
-  const handleDownloadPayslip = () => {
-    const element = document.getElementById('payslip-content');
-    const opt = {
-      margin:       0.5,
-      filename:     `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2 },
-      jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+
+    const handleDownloadPayslip = () => {
+      const element = document.getElementById('payslip-content');
+      const opt = {
+        margin: 0.5,
+        filename: `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+      };
+      html2pdf().set(opt).from(element).save();
     };
-    html2pdf().set(opt).from(element).save();
-  };
 
-  if (!currentUser) {
+    if (!currentUser) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+        </div>
+      );
+    }
+
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
-      </div>
-    );
-  }
-
-  return (
       <div className="space-y-6 w-full max-w-[1400px] mx-auto text-left">
         {/* Breadcrumb & Header */}
         <div className="mb-6">
@@ -1841,7 +1839,7 @@ export default function UserDashboard() {
 
                 {/* Custom Date Range Picker */}
                 <div className="mb-6">
-                  <CustomDateRangePicker 
+                  <CustomDateRangePicker
                     startDate={startDate}
                     endDate={endDate}
                     setStartDate={setStartDate}
@@ -1904,11 +1902,10 @@ export default function UserDashboard() {
                   </button>
                   <button
                     type="submit"
-                    className={`py-2.5 px-6 text-white text-xs font-bold rounded-[12px] transition-colors ${
-                      isLeaveOverlapping
+                    className={`py-2.5 px-6 text-white text-xs font-bold rounded-[12px] transition-colors ${isLeaveOverlapping
                         ? "bg-slate-400 cursor-not-allowed opacity-60"
                         : "bg-brand-primary hover:bg-brand-hover cursor-pointer"
-                    }`}
+                      }`}
                     disabled={actionLoading || isLeaveOverlapping}
                     title={isLeaveOverlapping ? "You already have a leave request for some of these dates. Please select a different date range." : ""}
                   >
@@ -1948,28 +1945,28 @@ export default function UserDashboard() {
                         const startF = req.startDate ? formatDisplayDate(req.startDate) : "";
                         const endF = req.endDate ? formatDisplayDate(req.endDate) : "";
 
-                        
-  const handleDownloadPayslip = () => {
-    const element = document.getElementById('payslip-content');
-    const opt = {
-      margin:       0.5,
-      filename:     `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2 },
-      jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
-    };
-    html2pdf().set(opt).from(element).save();
-  };
 
-  if (!currentUser) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
-      </div>
-    );
-  }
+                        const handleDownloadPayslip = () => {
+                          const element = document.getElementById('payslip-content');
+                          const opt = {
+                            margin: 0.5,
+                            filename: `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
+                            image: { type: 'jpeg', quality: 0.98 },
+                            html2canvas: { scale: 2 },
+                            jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+                          };
+                          html2pdf().set(opt).from(element).save();
+                        };
 
-  return (
+                        if (!currentUser) {
+                          return (
+                            <div className="flex items-center justify-center min-h-[400px]">
+                              <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+                            </div>
+                          );
+                        }
+
+                        return (
                           <tr key={req.id} className="hover:bg-bg-base/30">
                             <td className="py-3.5 pr-4 text-text-main font-bold">
                               <div className="flex items-center gap-1.5">
@@ -2019,36 +2016,35 @@ export default function UserDashboard() {
                         }
                         return null;
                       }
-                      
-  const handleDownloadPayslip = () => {
-    const element = document.getElementById('payslip-content');
-    const opt = {
-      margin:       0.5,
-      filename:     `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2 },
-      jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
-    };
-    html2pdf().set(opt).from(element).save();
-  };
 
-  if (!currentUser) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
-      </div>
-    );
-  }
+                      const handleDownloadPayslip = () => {
+                        const element = document.getElementById('payslip-content');
+                        const opt = {
+                          margin: 0.5,
+                          filename: `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
+                          image: { type: 'jpeg', quality: 0.98 },
+                          html2canvas: { scale: 2 },
+                          jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+                        };
+                        html2pdf().set(opt).from(element).save();
+                      };
 
-  return (
+                      if (!currentUser) {
+                        return (
+                          <div className="flex items-center justify-center min-h-[400px]">
+                            <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+                          </div>
+                        );
+                      }
+
+                      return (
                         <button
                           key={p}
                           onClick={() => setLeavesPage(p)}
-                          className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${
-                            leavesPage === p
+                          className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${leavesPage === p
                               ? "bg-brand-primary border-brand-primary text-white"
                               : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
-                          }`}
+                            }`}
                         >
                           {p}
                         </button>
@@ -2085,8 +2081,8 @@ export default function UserDashboard() {
                   .filter(r => r.status === "pending" && (r.leaveType || r.leave_type || "").toLowerCase().includes("annual"))
                   .reduce((sum, r) => sum + (Number(r.totalDays || r.total_days || parseInt(r.duration)) || 0), 0);
 
-                const rawAnnualQuota = currentUser?.annualLeaves !== undefined 
-                  ? Number(currentUser.annualLeaves) 
+                const rawAnnualQuota = currentUser?.annualLeaves !== undefined
+                  ? Number(currentUser.annualLeaves)
                   : (currentUser?.casual_leave_quota !== undefined ? Number(currentUser.casual_leave_quota) : Math.max(0, 25 - annualLeavesTaken));
 
                 const availableAnnualDays = Math.max(0, rawAnnualQuota - pendingAnnualDays);
@@ -2099,8 +2095,8 @@ export default function UserDashboard() {
                   .filter(r => r.status === "pending" && (r.leaveType || r.leave_type || "").toLowerCase().includes("sick"))
                   .reduce((sum, r) => sum + (Number(r.totalDays || r.total_days || parseInt(r.duration)) || 0), 0);
 
-                const rawSickQuota = currentUser?.sickLeaves !== undefined 
-                  ? Number(currentUser.sickLeaves) 
+                const rawSickQuota = currentUser?.sickLeaves !== undefined
+                  ? Number(currentUser.sickLeaves)
                   : (currentUser?.sick_leave_quota !== undefined ? Number(currentUser.sick_leave_quota) : Math.max(0, 10 - sickLeavesTaken));
 
                 const availableSickDays = Math.max(0, rawSickQuota - pendingSickDays);
@@ -2113,8 +2109,8 @@ export default function UserDashboard() {
                   .filter(r => r.status === "pending" && ((r.leaveType || r.leave_type || "").toLowerCase().includes("casual") || (r.leaveType || r.leave_type || "").toLowerCase().includes("paid")))
                   .reduce((sum, r) => sum + (Number(r.totalDays || r.total_days || parseInt(r.duration)) || 0), 0);
 
-                const rawCasualQuota = currentUser?.casualLeaves !== undefined 
-                  ? Number(currentUser.casualLeaves) 
+                const rawCasualQuota = currentUser?.casualLeaves !== undefined
+                  ? Number(currentUser.casualLeaves)
                   : (currentUser?.paid_leave_quota !== undefined ? Number(currentUser.paid_leave_quota) : Math.max(0, 6 - casualLeavesTaken));
 
                 const availableCasualDays = Math.max(0, rawCasualQuota - pendingCasualDays);
@@ -2270,7 +2266,7 @@ export default function UserDashboard() {
                 </span>
               </div>
               <p className="text-[11px] text-text-sec font-semibold leading-relaxed">
-                {teamOnLeaveCount > 0 
+                {teamOnLeaveCount > 0
                   ? `${teamOnLeaveCount} team member${teamOnLeaveCount > 1 ? "s are" : " is"} currently on leave today.`
                   : "All team members in your department are active and available today."}
               </p>
@@ -2285,15 +2281,15 @@ export default function UserDashboard() {
     .filter(pl => (pl.status || "active") === "active" && !dismissedLeaves.includes(pl.id))
     .sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""));
 
-  
+
   const handleDownloadPayslip = () => {
     const element = document.getElementById('payslip-content');
     const opt = {
-      margin:       0.5,
-      filename:     `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2 },
-      jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+      margin: 0.5,
+      filename: `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2 },
+      jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
     };
     html2pdf().set(opt).from(element).save();
   };
@@ -2355,8 +2351,8 @@ export default function UserDashboard() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
             {activePaidLeaves.map((pl) => (
-              <div 
-                key={pl.id} 
+              <div
+                key={pl.id}
                 onClick={() => setSelectedPaidLeaveDetail(pl)}
                 className="p-5 rounded-[20px] bg-gradient-to-br from-brand-primary/5 via-transparent to-transparent border border-border-card hover:border-brand-primary/30 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all duration-300 cursor-pointer flex flex-col gap-3 group relative overflow-hidden text-left"
               >
@@ -2494,18 +2490,17 @@ export default function UserDashboard() {
       <div className="bg-bg-card border border-border-card rounded-[20px] p-5 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
           <div className="flex items-center gap-2">
-            <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-              isAttendanceLocked ? "bg-red-500 animate-pulse" :
-              !isCheckedIn && !isCheckedOut && !isOnBreak ? "bg-slate-400" :
-              isCheckedIn ? "bg-brand-success animate-pulse" :
-              isOnBreak ? "bg-brand-warning animate-pulse" :
-              "bg-brand-primary"
-            }`} />
+            <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${isAttendanceLocked ? "bg-red-500 animate-pulse" :
+                !isCheckedIn && !isCheckedOut && !isOnBreak ? "bg-slate-400" :
+                  isCheckedIn ? "bg-brand-success animate-pulse" :
+                    isOnBreak ? "bg-brand-warning animate-pulse" :
+                      "bg-brand-primary"
+              }`} />
             <span className="text-sm font-extrabold text-text-main">
               {isAttendanceLocked ? "Marked Absent (Locked)" :
-               !isCheckedIn && !isCheckedOut && !isOnBreak ? "Not Checked In" :
-               isCheckedIn ? "Active Shift" :
-               isOnBreak ? "On Break" : "Shift Completed"}
+                !isCheckedIn && !isCheckedOut && !isOnBreak ? "Not Checked In" :
+                  isCheckedIn ? "Active Shift" :
+                    isOnBreak ? "On Break" : "Shift Completed"}
             </span>
             <span className="text-xs text-text-mut font-semibold">
               ({shiftProgressPercent}% of shift)
@@ -2530,12 +2525,11 @@ export default function UserDashboard() {
         {/* Progress bar track */}
         <div className="w-full h-3 bg-bg-base rounded-full overflow-hidden border border-border-card">
           <div
-            className={`h-full rounded-full transition-all duration-700 ease-in-out relative overflow-hidden ${
-              shiftProgressPercent >= 100 ? "bg-brand-success" :
-              isOnBreak ? "bg-brand-warning" :
-              isCheckedIn ? "bg-brand-primary" :
-              "bg-slate-400"
-            }`}
+            className={`h-full rounded-full transition-all duration-700 ease-in-out relative overflow-hidden ${shiftProgressPercent >= 100 ? "bg-brand-success" :
+                isOnBreak ? "bg-brand-warning" :
+                  isCheckedIn ? "bg-brand-primary" :
+                    "bg-slate-400"
+              }`}
             style={{ width: `${Math.max(shiftProgressPercent > 0 ? 2 : 0, shiftProgressPercent)}%` }}
           >
             {/* Shimmer animation for active shift */}
@@ -2577,8 +2571,8 @@ export default function UserDashboard() {
                   {todayLog?.penalty_status === "unseen_task_penalty"
                     ? <>You did not acknowledge an assigned task within 10 minutes. Your attendance has been marked <strong className="text-red-500">Absent</strong> and check-in is locked for today.</>
                     : todayLog?.penalty_status === "missed_hourly_report_penalty"
-                    ? <>You missed submitting required progress reports. Your attendance has been marked <strong className="text-red-500">Absent</strong> and check-in is locked for today.</>
-                    : <>Your attendance has been marked <strong className="text-red-500">Absent</strong> and check-in is locked for today.</>}
+                      ? <>You missed submitting required progress reports. Your attendance has been marked <strong className="text-red-500">Absent</strong> and check-in is locked for today.</>
+                      : <>Your attendance has been marked <strong className="text-red-500">Absent</strong> and check-in is locked for today.</>}
                 </p>
                 {todayLog?.penalty_reason && (
                   <div className="mb-4 p-3 bg-red-500/5 border border-red-500/20 rounded-[12px] text-[11px] font-mono text-red-400">
@@ -2667,7 +2661,7 @@ export default function UserDashboard() {
                   {/* Daily 3-Break System: Resumed breaks are removed from system */}
                   {(() => {
                     const breaksList = Array.isArray(todayLog?.breaks) ? todayLog.breaks : [];
-                    
+
                     const isBreak1Resumed = breaksList.some(b => {
                       const t = String(b.breakType || b.type || "").toLowerCase();
                       return (t === "short" || t === "break1") && Boolean(b.end || b.resumeTime);
@@ -2882,19 +2876,19 @@ export default function UserDashboard() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={weeklyHoursData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.2} />
-                  <XAxis 
-                    dataKey="label" 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fontSize: 10, fill: '#64748b', fontWeight: 'bold' }} 
-                    dy={10} 
+                  <XAxis
+                    dataKey="label"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 10, fill: '#64748b', fontWeight: 'bold' }}
+                    dy={10}
                   />
-                  <YAxis 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fontSize: 10, fill: '#64748b', fontWeight: 'bold' }} 
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 10, fill: '#64748b', fontWeight: 'bold' }}
                   />
-                  <Tooltip 
+                  <Tooltip
                     cursor={{ fill: '#f1f5f9', opacity: 0.1 }}
                     contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 'bold' }}
                     itemStyle={{ color: '#fff' }}
@@ -2963,13 +2957,13 @@ export default function UserDashboard() {
                     <div className="text-xs font-bold text-brand-primary flex items-center gap-1 animate-pulse">
                       <Clock size={12} />
                       {(() => {
-                         const startedTime = new Date(task.timerStartedAt).getTime();
-                         const rawElapsed = Math.max(0, Math.floor((currentTime.getTime() - startedTime) / 1000));
-                         const elapsed = Math.min(rawElapsed, 8 * 3600);
-                         const h = Math.floor(elapsed / 3600);
-                         const m = Math.floor((elapsed % 3600) / 60);
-                         const s = elapsed % 60;
-                         return `${h > 0 ? h + 'h ' : ''}${m}m ${s}s`;
+                        const startedTime = new Date(task.timerStartedAt).getTime();
+                        const rawElapsed = Math.max(0, Math.floor((currentTime.getTime() - startedTime) / 1000));
+                        const elapsed = Math.min(rawElapsed, 8 * 3600);
+                        const h = Math.floor(elapsed / 3600);
+                        const m = Math.floor((elapsed % 3600) / 60);
+                        const s = elapsed % 60;
+                        return `${h > 0 ? h + 'h ' : ''}${m}m ${s}s`;
                       })()}
                     </div>
                   </div>
@@ -2977,60 +2971,60 @@ export default function UserDashboard() {
               </div>
             </div>
           )}
-            {/* Birthdays & News Card */}
-            <div className="bg-bg-card border border-border-card rounded-[24px] overflow-hidden shadow-sm">
-              <div className="bg-gradient-to-r from-brand-primary to-indigo-600 p-5 text-white text-left flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] font-bold text-white/70 uppercase tracking-wider block">HAPPENING NOW</span>
-                  <h3 className="font-extrabold text-base text-white mt-0.5 flex items-center gap-2">
-                    {birthdays.length > 0 ? (
-                      <>Upcoming Birthdays <Cake size={18} /></>
-                    ) : (
-                      <>Important Updates <Newspaper size={18} /></>
-                    )}
-                  </h3>
+          {/* Birthdays & News Card */}
+          <div className="bg-bg-card border border-border-card rounded-[24px] overflow-hidden shadow-sm">
+            <div className="bg-gradient-to-r from-brand-primary to-indigo-600 p-5 text-white text-left flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-white/70 uppercase tracking-wider block">HAPPENING NOW</span>
+                <h3 className="font-extrabold text-base text-white mt-0.5 flex items-center gap-2">
+                  {birthdays.length > 0 ? (
+                    <>Upcoming Birthdays <Cake size={18} /></>
+                  ) : (
+                    <>Important Updates <Newspaper size={18} /></>
+                  )}
+                </h3>
+              </div>
+              {birthdays.length > 0 ? (
+                <div className="bg-white/20 p-2 rounded-full animate-pulse flex-shrink-0">
+                  <svg className="w-5 h-5 text-yellow-300" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" /></svg>
                 </div>
-                {birthdays.length > 0 ? (
-                  <div className="bg-white/20 p-2 rounded-full animate-pulse flex-shrink-0">
-                    <svg className="w-5 h-5 text-yellow-300" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-                  </div>
-                ) : (
-                  <div className="bg-white/20 p-2 rounded-full flex-shrink-0">
-                    <svg className="w-5 h-5 text-blue-200" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9.5a2.5 2.5 0 00-2.5-2.5H15M9 11l3 3L22 4"/></svg>
-                  </div>
-                )}
-              </div>
-              <div className="p-5 text-left">
-                {birthdays.length > 0 ? (
-                  <div className="space-y-4">
-                    {birthdays.map((b, idx) => (
-                      <div key={idx} className={`flex items-center gap-3 p-3 rounded-[12px] border transition-all relative overflow-hidden ${b.isBirthdayToday ? 'bg-gradient-to-r from-amber-500/10 via-rose-500/5 to-amber-500/10 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.15)] scale-[1.02]' : 'bg-bg-base/30 border-border-card hover:border-brand-primary/30'}`}>
-                        {b.isBirthdayToday && (
-                           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent" style={{ animation: "shimmer 2s infinite" }} />
-                        )}
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold uppercase shadow-sm flex-shrink-0 z-10 overflow-hidden ${b.isBirthdayToday ? 'bg-amber-500/20 text-amber-500' : 'bg-brand-primary/10 text-brand-primary'}`}>
-                          {b.avatar ? (
-                            <img src={b.avatar} alt={b.name} className="w-full h-full object-cover" />
-                          ) : b.isBirthdayToday ? (
-                            <Cake size={20} className="animate-bounce" />
-                          ) : (
-                            b.name ? b.name.charAt(0) : "U"
-                          )}
-                        </div>
-                        <div className="z-10">
-                          <h4 className="font-bold text-sm text-text-main">{b.name}</h4>
-                          <p className={`text-xs font-semibold ${b.isBirthdayToday ? 'text-amber-500' : 'text-brand-primary'}`}>
-                            {b.isBirthdayToday ? "🎉 Today!" : "Tomorrow!"}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-text-mut text-center py-4 italic font-semibold">No new updates today.</p>
-                )}
-              </div>
+              ) : (
+                <div className="bg-white/20 p-2 rounded-full flex-shrink-0">
+                  <svg className="w-5 h-5 text-blue-200" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9.5a2.5 2.5 0 00-2.5-2.5H15M9 11l3 3L22 4" /></svg>
+                </div>
+              )}
             </div>
+            <div className="p-5 text-left">
+              {birthdays.length > 0 ? (
+                <div className="space-y-4">
+                  {birthdays.map((b, idx) => (
+                    <div key={idx} className={`flex items-center gap-3 p-3 rounded-[12px] border transition-all relative overflow-hidden ${b.isBirthdayToday ? 'bg-gradient-to-r from-amber-500/10 via-rose-500/5 to-amber-500/10 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.15)] scale-[1.02]' : 'bg-bg-base/30 border-border-card hover:border-brand-primary/30'}`}>
+                      {b.isBirthdayToday && (
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent" style={{ animation: "shimmer 2s infinite" }} />
+                      )}
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold uppercase shadow-sm flex-shrink-0 z-10 overflow-hidden ${b.isBirthdayToday ? 'bg-amber-500/20 text-amber-500' : 'bg-brand-primary/10 text-brand-primary'}`}>
+                        {b.avatar ? (
+                          <img src={b.avatar} alt={b.name} className="w-full h-full object-cover" />
+                        ) : b.isBirthdayToday ? (
+                          <Cake size={20} className="animate-bounce" />
+                        ) : (
+                          b.name ? b.name.charAt(0) : "U"
+                        )}
+                      </div>
+                      <div className="z-10">
+                        <h4 className="font-bold text-sm text-text-main">{b.name}</h4>
+                        <p className={`text-xs font-semibold ${b.isBirthdayToday ? 'text-amber-500' : 'text-brand-primary'}`}>
+                          {b.isBirthdayToday ? "🎉 Today!" : "Tomorrow!"}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-text-mut text-center py-4 italic font-semibold">No new updates today.</p>
+              )}
+            </div>
+          </div>
 
           {/* Card 1: GPS Coordinates Card */}
           <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm">
@@ -3080,7 +3074,7 @@ export default function UserDashboard() {
             <div className="relative flex gap-6 overflow-x-auto text-left py-2 mt-2 [&::-webkit-scrollbar]:hidden">
               {/* Horizontal Line Background */}
               <div className="absolute top-4 left-0 right-0 h-px bg-border-card" />
-              
+
               {recentActivities.map((act, idx) => {
                 let dotColor = "bg-brand-primary";
                 if (act.type === "out") dotColor = "bg-brand-danger";
@@ -3114,8 +3108,8 @@ export default function UserDashboard() {
               <span>View All History</span>
               <ChevronRight size={14} />
             </button>
+          </div>
         </div>
-      </div>
       </div>
 
       {/* Biometric Verification Modal */}
@@ -3251,12 +3245,12 @@ export default function UserDashboard() {
                   <span className="text-sm font-bold text-text-main mt-0.5 block">
                     {selectedPaidLeaveDetail.startDate && selectedPaidLeaveDetail.endDate ? (
                       selectedPaidLeaveDetail.startDate === selectedPaidLeaveDetail.endDate ? (
-                        formatDisplayDate(selectedPaidLeaveDetail.startDate, { full: true, weekday: true })
+                        new Date(selectedPaidLeaveDetail.startDate).toLocaleDateString([], { weekday: 'long', month: "long", day: "numeric", year: "numeric" })
                       ) : (
-                        `${formatDisplayDate(selectedPaidLeaveDetail.startDate, { includeYear: true })} to ${formatDisplayDate(selectedPaidLeaveDetail.endDate, { includeYear: true })}`
+                        `${new Date(selectedPaidLeaveDetail.startDate).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })} to ${new Date(selectedPaidLeaveDetail.endDate).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}`
                       )
                     ) : (
-                      formatDisplayDate(selectedPaidLeaveDetail.date || selectedPaidLeaveDetail.createdAt, { full: true, weekday: true })
+                      new Date(selectedPaidLeaveDetail.date || selectedPaidLeaveDetail.createdAt).toLocaleDateString([], { weekday: 'long', month: "long", day: "numeric", year: "numeric" })
                     )}
                   </span>
                 </div>

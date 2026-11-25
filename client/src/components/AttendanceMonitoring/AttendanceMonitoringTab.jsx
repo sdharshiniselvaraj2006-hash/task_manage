@@ -4,8 +4,6 @@ import {
   Table,
   Activity,
   Clock,
-  MapPin,
-  TrendingUp,
   RefreshCw
 } from "lucide-react";
 import AttendanceOverviewCards from "./AttendanceOverviewCards";
@@ -13,8 +11,6 @@ import AttendanceFilterBar from "./AttendanceFilterBar";
 import EmployeeAttendanceTable from "./EmployeeAttendanceTable";
 import LiveAttendancePulse from "./LiveAttendancePulse";
 import RegularizationQueuePanel from "./RegularizationQueuePanel";
-import VerificationMonitoringPanel from "./VerificationMonitoringPanel";
-import AttendanceAnalyticsPanel from "./AttendanceAnalyticsPanel";
 import EmployeeAttendanceDetailsModal from "./EmployeeAttendanceDetailsModal";
 import ReviewAttendanceModal from "./ReviewAttendanceModal";
 import EmployeeAttendanceDownloadModal from "./EmployeeAttendanceDownloadModal";
@@ -29,7 +25,7 @@ import {
 
 export default function AttendanceMonitoringTab({ currentUser, showToast }) {
   // Navigation sub-tab
-  const [subTab, setSubTab] = useState("records"); // "records" | "live" | "regularization" | "verification" | "analytics"
+  const [subTab, setSubTab] = useState("records"); // "records" | "live" | "regularization"
 
   // Unified Filter State
   const [filters, setFilters] = useState({
@@ -247,7 +243,7 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
             Attendance Monitoring & Audit
           </h1>
           <p className="text-xs sm:text-sm text-zinc-400 mt-1 max-w-2xl">
-            Real-time workforce tracking, GPS geofencing & biometric telemetry, shift compliance, and automated regularization review.
+            Real-time workforce tracking, shift compliance, and automated regularization review.
           </p>
         </div>
 
@@ -327,36 +323,10 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
             </span>
           )}
         </button>
-
-        <button
-          type="button"
-          onClick={() => setSubTab("verification")}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${
-            subTab === "verification"
-              ? "bg-purple-600 text-white shadow-md shadow-purple-950/40"
-              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
-          }`}
-        >
-          <MapPin className="w-4 h-4" />
-          GPS & Biometrics
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setSubTab("analytics")}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${
-            subTab === "analytics"
-              ? "bg-purple-600 text-white shadow-md shadow-purple-950/40"
-              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
-          }`}
-        >
-          <TrendingUp className="w-4 h-4" />
-          Analytics & Reports
-        </button>
       </div>
 
-      {/* Filter Bar (Visible across relevant sub-tabs) */}
-      {(subTab === "records" || subTab === "verification" || subTab === "analytics") && (
+      {/* Filter Bar (Visible on Employee Attendance Table) */}
+      {subTab === "records" && (
         <AttendanceFilterBar
           filters={filters}
           onChange={setFilters}
@@ -399,24 +369,6 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
           loading={loadingAnalytics}
           onApprove={handleApproveRegularization}
           onReject={handleRejectRegularization}
-        />
-      )}
-
-      {subTab === "verification" && (
-        <VerificationMonitoringPanel
-          records={records}
-          loading={loadingRecords}
-          onReviewRecord={(rec) => setReviewModal({ open: true, record: rec })}
-          onViewEmployee={(userId, rec) => setDetailsModal({ open: true, userId, record: rec })}
-        />
-      )}
-
-      {subTab === "analytics" && (
-        <AttendanceAnalyticsPanel
-          analyticsData={analyticsData}
-          records={records}
-          loading={loadingAnalytics}
-          showToast={showToast}
         />
       )}
 
