@@ -2,6 +2,15 @@ import crypto from "crypto";
 import { query } from "../config/db.js";
 import auditService from "../services/auditService.js";
 import { formatDateOnly, calculateDaysBetween } from "./leaveController.js";
+import { getCompanyTimezone, getLocalDateInTz } from "../services/complianceSupervisor.js";
+
+/**
+ * Returns today's date formatted as YYYY-MM-DD in the company's timezone (or Asia/Kolkata fallback)
+ */
+const getTodayForCompany = async (companyId) => {
+  const tz = await getCompanyTimezone(companyId);
+  return getLocalDateInTz(tz);
+};
 
 /**
  * Returns today's date formatted as YYYY-MM-DD in local time
@@ -329,42 +338,20 @@ const resolveTargetCompany = (req) => {
 export const getAttendanceMonitoringSummary = async (req, res) => {
   try {
     const { isSuperAdmin, targetCompanyId } = resolveTargetCompany(req);
-    const filterType = req.query.filterType || req.query.range || "today";
-    const { department, employeeId, status } = req.query;
+    const { department, employeeId } = req.query;
 
-    let startDate = req.query.startDate;
-    let endDate = req.query.endDate;
+    // Enforce today's date strictly using company's configured timezone
+    const todayStr = await getTodayForCompany(targetCompanyId);
+    const startDate = todayStr;
+    const endDate = todayStr;
 
-    if (filterType === "today") {
-      startDate = getTodayDateStr();
-      endDate = startDate;
-    } else if (filterType === "yesterday") {
-      startDate = getYesterdayDateStr();
-      endDate = startDate;
-    } else if (filterType === "this_week") {
-      const week = getThisWeekRange();
-      startDate = week.startDate;
-      endDate = week.endDate;
-    } else if (filterType === "this_month") {
-      const month = getThisMonthRange();
-      startDate = month.startDate;
-      endDate = month.endDate;
-    } else if (req.query.date) {
-      startDate = req.query.date;
-      endDate = req.query.date;
-    } else if (!startDate || !endDate) {
-      startDate = getTodayDateStr();
-      endDate = startDate;
-    }
-
-    startDate = formatDateOnly(startDate);
-    endDate = formatDateOnly(endDate);
-
-    // 1. Fetch Company Users
+    // 1. Fetch Active Company Users
+    // Exclude inactive employees, clients, superadmin; ensure distinct employees
     let userSql = `
-      SELECT id, name, employee_id, department, role, shift_start, shift_end, status
+      SELECT DISTINCT id, name, employee_id, department, role, shift_start, shift_end, status
       FROM users
       WHERE role NOT IN ('superadmin', 'client')
+        AND (status IS NULL OR LOWER(status) = 'active' OR LOWER(status) != 'inactive')
     `;
     const userParams = [];
     if (targetCompanyId) {
@@ -395,37 +382,40 @@ export const getAttendanceMonitoringSummary = async (req, res) => {
         checkedOut: 0,
         onLeave: 0,
         pendingRegularization: 0,
-        startDate,
-        endDate,
-        filterType
+        date: todayStr,
+        startDate: todayStr,
+        endDate: todayStr,
+        filterType: "today"
       });
     }
 
-    // 2. Fetch Attendance Records for this range
+    // 2. Fetch Attendance Records for TODAY only
+    // Deduplicate by user_id to prevent duplicate attendance rows from inflating KPI counts
     let attSql = `
-      SELECT a.*, a.date::text as date_str
+      SELECT DISTINCT ON (a.user_id) a.*, a.date::text as date_str
       FROM attendance a
-      WHERE a.date >= $1 AND a.date <= $2
-        AND a.user_id = ANY($3::text[])
+      WHERE a.date = $1::date
+        AND a.user_id = ANY($2::text[])
     `;
-    const attParams = [startDate, endDate, userIds];
+    const attParams = [todayStr, userIds];
     if (targetCompanyId) {
       attParams.push(targetCompanyId);
       attSql += ` AND a.company_id = $${attParams.length}`;
     }
+    attSql += ` ORDER BY a.user_id, a.created_at DESC`;
 
     const attRes = await query(attSql, attParams);
     const attendanceRecords = attRes.rows;
 
-    // 3. Fetch Approved Leaves for this range
+    // 3. Fetch Approved Leaves covering TODAY only (start_date <= today AND end_date >= today)
     let leaveSql = `
-      SELECT l.*
+      SELECT DISTINCT l.user_id, l.start_date, l.end_date, l.status
       FROM leave_requests l
       WHERE l.status = 'approved'
-        AND l.start_date <= $2 AND l.end_date >= $1
-        AND l.user_id = ANY($3::text[])
+        AND l.start_date <= $1::date AND l.end_date >= $1::date
+        AND l.user_id = ANY($2::text[])
     `;
-    const leaveParams = [startDate, endDate, userIds];
+    const leaveParams = [todayStr, userIds];
     if (targetCompanyId) {
       leaveParams.push(targetCompanyId);
       leaveSql += ` AND l.company_id = $${leaveParams.length}`;
@@ -433,14 +423,29 @@ export const getAttendanceMonitoringSummary = async (req, res) => {
     const leaveRes = await query(leaveSql, leaveParams);
     const approvedLeaves = leaveRes.rows;
 
-    // 4. Fetch Pending Regularizations
+    // 4. Check for Weekly Off (weekend) & Paid Holidays for today
+    const dateObj = new Date(todayStr + "T00:00:00");
+    const dayOfWeek = dateObj.getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+    let isHoliday = false;
+    if (targetCompanyId) {
+      const holRes = await query(
+        `SELECT title FROM paid_leaves WHERE status = 'active' AND start_date <= $1::date AND end_date >= $1::date AND (company_id = $2 OR company_id IS NULL)`,
+        [todayStr, targetCompanyId]
+      );
+      isHoliday = holRes.rows.length > 0;
+    }
+
+    // 5. Fetch Pending Regularizations related to TODAY's attendance
     let regSql = `
-      SELECT count(*) as count
+      SELECT count(DISTINCT r.id) as count
       FROM regularization_requests r
       WHERE r.status = 'pending'
-        AND r.user_id = ANY($1::text[])
+        AND (r.attendance_date = $1::date OR (r.attendance_date IS NULL AND r.created_at::date = $1::date))
+        AND r.user_id = ANY($2::text[])
     `;
-    const regParams = [userIds];
+    const regParams = [todayStr, userIds];
     if (targetCompanyId) {
       regParams.push(targetCompanyId);
       regSql += ` AND r.company_id = $${regParams.length}`;
@@ -448,50 +453,40 @@ export const getAttendanceMonitoringSummary = async (req, res) => {
     const regRes = await query(regSql, regParams);
     const pendingRegularization = parseInt(regRes.rows[0]?.count || "0", 10);
 
-    // 5. Aggregate metrics
+    // 6. Aggregate metrics for today
     let presentCount = 0;
     let lateCount = 0;
     let currentlyWorkingCount = 0;
     let checkedOutCount = 0;
-    let onLeaveCount = 0;
 
-    // Fast user lookup
+    // User lookup map
     const userMap = new Map();
     users.forEach(u => userMap.set(u.id, u));
 
-    // Group attendance by (user_id + date)
-    const attMap = new Map();
-    attendanceRecords.forEach(a => {
-      const d = formatDateOnly(a.date_str || a.date);
-      const key = `${a.user_id}_${d}`;
-      attMap.set(key, a);
-    });
-
-    // Check approved leaves coverage
+    // Approved leaves set
     const leaveCoverage = new Set();
     approvedLeaves.forEach(l => {
-      users.forEach(u => {
-        if (u.id === l.user_id) {
-          leaveCoverage.add(`${l.user_id}`);
-        }
-      });
+      leaveCoverage.add(l.user_id);
     });
 
-    // Evaluate each attendance log
     const evaluatedPresentUsers = new Set();
 
     attendanceRecords.forEach(a => {
       const u = userMap.get(a.user_id);
       const shiftStartStr = u?.shift_start || "09:00";
+      const shiftEndStr = u?.shift_end || "18:00";
       const shiftStartMins = parseTimeToMinutes(shiftStartStr) || 540;
+      let shiftEndMins = parseTimeToMinutes(shiftEndStr) || 1080;
+      const isOvernight = shiftEndMins < shiftStartMins;
+      if (isOvernight) shiftEndMins += 1440;
 
       // Actual check-in takes priority over approved leave!
       const hasCheckedIn = Boolean(a.check_in && !a.is_admin_locked && a.status !== "absent");
 
       if (hasCheckedIn) {
         evaluatedPresentUsers.add(a.user_id);
-        // Remove employee from onLeaveCount if they checked in
-        leaveCoverage.delete(`${a.user_id}`);
+        // If employee checked in today, their actual check-in takes priority over leave
+        leaveCoverage.delete(a.user_id);
         presentCount++;
 
         // Late calculation (5-minute grace threshold or explicit late status)
@@ -510,27 +505,19 @@ export const getAttendanceMonitoringSummary = async (req, res) => {
       }
     });
 
-    onLeaveCount = leaveCoverage.size;
+    const onLeaveCount = leaveCoverage.size;
 
-    // Absent employees
+    // Absent employees: Scheduled to work today, no check-in, no approved leave
+    // Exclude weekly offs and holidays from absent calculations
     let absentCount = 0;
-    if (startDate === endDate) {
+    if (!isWeekend && !isHoliday) {
       users.forEach(u => {
-        const key = `${u.id}_${startDate}`;
-        const hasAtt = attMap.get(key);
-        const hasCheckedIn = Boolean(hasAtt && hasAtt.check_in && !hasAtt.is_admin_locked && hasAtt.status !== "absent");
-        const hasActiveLeave = !hasCheckedIn && approvedLeaves.some(l => {
-          const lStart = formatDateOnly(l.start_date);
-          const lEnd = formatDateOnly(l.end_date);
-          return l.user_id === u.id && startDate >= lStart && startDate <= lEnd;
-        });
-
-        if (!hasActiveLeave && !hasCheckedIn) {
+        const hasCheckedIn = evaluatedPresentUsers.has(u.id);
+        const hasLeave = leaveCoverage.has(u.id);
+        if (!hasCheckedIn && !hasLeave) {
           absentCount++;
         }
       });
-    } else {
-      absentCount = Math.max(0, totalEmployees - evaluatedPresentUsers.size - onLeaveCount);
     }
 
     res.json({
@@ -542,9 +529,10 @@ export const getAttendanceMonitoringSummary = async (req, res) => {
       checkedOut: checkedOutCount,
       onLeave: onLeaveCount,
       pendingRegularization,
-      startDate,
-      endDate,
-      filterType
+      date: todayStr,
+      startDate: todayStr,
+      endDate: todayStr,
+      filterType: "today"
     });
   } catch (err) {
     console.error("getAttendanceMonitoringSummary error:", err);
@@ -560,7 +548,6 @@ export const getAttendanceMonitoringSummary = async (req, res) => {
 export const getAttendanceMonitoringRecords = async (req, res) => {
   try {
     const { isSuperAdmin, targetCompanyId } = resolveTargetCompany(req);
-    const filterType = req.query.filterType || req.query.range || "today";
     const {
       department,
       status,
@@ -571,33 +558,10 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
       sortOrder = "desc"
     } = req.query;
 
-    let startDate = req.query.startDate;
-    let endDate = req.query.endDate;
-
-    if (filterType === "today") {
-      startDate = getTodayDateStr();
-      endDate = startDate;
-    } else if (filterType === "yesterday") {
-      startDate = getYesterdayDateStr();
-      endDate = startDate;
-    } else if (filterType === "this_week") {
-      const week = getThisWeekRange();
-      startDate = week.startDate;
-      endDate = week.endDate;
-    } else if (filterType === "this_month") {
-      const month = getThisMonthRange();
-      startDate = month.startDate;
-      endDate = month.endDate;
-    } else if (req.query.date) {
-      startDate = req.query.date;
-      endDate = req.query.date;
-    } else if (!startDate || !endDate) {
-      startDate = getTodayDateStr();
-      endDate = startDate;
-    }
-
-    startDate = formatDateOnly(startDate);
-    endDate = formatDateOnly(endDate);
+    // Enforce today's date strictly using company's configured timezone
+    const todayStr = await getTodayForCompany(targetCompanyId);
+    const startDate = todayStr;
+    const endDate = todayStr;
 
     // Fetch company settings for geofencing
     let allowedRadius = 200;
@@ -608,11 +572,13 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
       }
     }
 
-    // 1. Fetch Users
+    // 1. Fetch Active Users
+    // Exclude inactive employees, clients, superadmin; ensure distinct employees
     let userSql = `
-      SELECT id, name, email, employee_id, department, designation, role, shift_start, shift_end, avatar_url, phone, status
+      SELECT DISTINCT id, name, email, employee_id, department, designation, role, shift_start, shift_end, avatar_url, phone, status
       FROM users
       WHERE role NOT IN ('superadmin', 'client')
+        AND (status IS NULL OR LOWER(status) = 'active' OR LOWER(status) != 'inactive')
     `;
     const userParams = [];
     if (targetCompanyId) {
@@ -653,40 +619,43 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
           limit: Number(limit),
           totalPages: 0
         },
+        date: todayStr,
         startDate,
         endDate,
-        filterType
+        filterType: "today"
       });
     }
 
     const userMap = new Map();
     users.forEach(u => userMap.set(u.id, u));
 
-    // 2. Fetch Attendance for Date Range
+    // 2. Fetch Attendance for TODAY only (DISTINCT ON user_id to prevent duplicates)
     let attSql = `
-      SELECT a.*, a.date::text as date_str
+      SELECT DISTINCT ON (a.user_id) a.*, a.date::text as date_str
       FROM attendance a
-      WHERE a.date >= $1 AND a.date <= $2
-        AND a.user_id = ANY($3::text[])
+      WHERE a.date = $1::date
+        AND a.user_id = ANY($2::text[])
     `;
-    const attParams = [startDate, endDate, userIds];
+    const attParams = [todayStr, userIds];
     if (targetCompanyId) {
       attParams.push(targetCompanyId);
       attSql += ` AND a.company_id = $${attParams.length}`;
     }
-    attSql += " ORDER BY a.date DESC, a.check_in DESC NULLS LAST";
+    attSql += " ORDER BY a.user_id, a.check_in DESC NULLS LAST";
     const attRes = await query(attSql, attParams);
     const attendanceRecords = attRes.rows;
+    const attMap = new Map();
+    attendanceRecords.forEach(a => attMap.set(a.user_id, a));
 
-    // 3. Fetch Approved Leaves for Date Range
+    // 3. Fetch Approved Leaves covering TODAY only (start_date <= today AND end_date >= today)
     let leaveSql = `
-      SELECT l.*
+      SELECT DISTINCT l.*
       FROM leave_requests l
       WHERE l.status = 'approved'
-        AND l.start_date <= $2 AND l.end_date >= $1
-        AND l.user_id = ANY($3::text[])
+        AND l.start_date <= $1::date AND l.end_date >= $1::date
+        AND l.user_id = ANY($2::text[])
     `;
-    const leaveParams = [startDate, endDate, userIds];
+    const leaveParams = [todayStr, userIds];
     if (targetCompanyId) {
       leaveParams.push(targetCompanyId);
       leaveSql += ` AND l.company_id = $${leaveParams.length}`;
@@ -694,14 +663,14 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
     const leaveRes = await query(leaveSql, leaveParams);
     const leaveRecords = leaveRes.rows;
 
-    // 4. Fetch Regularizations for Date Range
+    // 4. Fetch Regularizations for TODAY only
     let regSql = `
       SELECT r.*
       FROM regularization_requests r
-      WHERE r.attendance_date >= $1 AND r.attendance_date <= $2
-        AND r.user_id = ANY($3::text[])
+      WHERE (r.attendance_date = $1::date OR (r.attendance_date IS NULL AND r.created_at::date = $1::date))
+        AND r.user_id = ANY($2::text[])
     `;
-    const regParams = [startDate, endDate, userIds];
+    const regParams = [todayStr, userIds];
     if (targetCompanyId) {
       regParams.push(targetCompanyId);
       regSql += ` AND r.company_id = $${regParams.length}`;
@@ -709,19 +678,19 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
     const regRes = await query(regSql, regParams);
     const regMap = new Map();
     regRes.rows.forEach(r => {
-      const d = formatDateOnly(r.attendance_date);
+      const d = formatDateOnly(r.attendance_date || todayStr);
       regMap.set(`${r.user_id}_${d}`, r);
     });
 
-    // 5. Fetch Verification Attempts for Date Range
+    // 5. Fetch Verification Attempts for TODAY only
     let avaSql = `
       SELECT ava.*
       FROM attendance_verification_attempts ava
-      WHERE ava.attempted_at::date >= $1::date AND ava.attempted_at::date <= $2::date
-        AND ava.user_id = ANY($3::text[])
+      WHERE ava.attempted_at::date = $1::date
+        AND ava.user_id = ANY($2::text[])
       ORDER BY ava.attempted_at DESC
     `;
-    const avaRes = await query(avaSql, [startDate, endDate, userIds]);
+    const avaRes = await query(avaSql, [todayStr, userIds]);
     const avaMap = new Map();
     avaRes.rows.forEach(v => {
       const d = formatDateOnly(v.attempted_at);
@@ -729,12 +698,12 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
       if (!avaMap.has(key)) avaMap.set(key, v);
     });
 
-    // 6. Paid Holidays in range
+    // 6. Paid Holidays covering TODAY only
     let holidayMap = new Map();
     if (targetCompanyId) {
       const holRes = await query(
-        `SELECT title, start_date, end_date FROM paid_leaves WHERE status = 'active' AND start_date <= $2 AND end_date >= $1 AND (company_id = $3 OR company_id IS NULL)`,
-        [startDate, endDate, targetCompanyId]
+        `SELECT title, start_date, end_date FROM paid_leaves WHERE status = 'active' AND start_date <= $1::date AND end_date >= $1::date AND (company_id = $2 OR company_id IS NULL)`,
+        [todayStr, targetCompanyId]
       );
       holRes.rows.forEach(h => {
         holidayMap.set(formatDateOnly(h.start_date), h.title);
@@ -758,7 +727,11 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
       const shiftDisplay = `${formatTimeDisplay(shiftStartStr)} - ${formatTimeDisplay(shiftEndStr)}`;
 
       const shiftStartMins = parseTimeToMinutes(shiftStartStr) || 540;
-      const shiftEndMins = parseTimeToMinutes(shiftEndStr) || 1080;
+      let shiftEndMins = parseTimeToMinutes(shiftEndStr) || 1080;
+      const isOvernight = shiftEndMins < shiftStartMins;
+      if (isOvernight) {
+        shiftEndMins += 1440;
+      }
 
       const breakCalc = processAttendanceBreaksAndHours(att, user, dStr);
 
@@ -780,9 +753,14 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
         }
 
         if (checkOutTime) {
-          const outMins = parseTimeToMinutes(checkOutTime);
-          if (outMins !== null && outMins < shiftEndMins) {
-            earlyDepartureMinutes = shiftEndMins - outMins;
+          let outMins = parseTimeToMinutes(checkOutTime);
+          if (outMins !== null) {
+            if (isOvernight && outMins < shiftStartMins) {
+              outMins += 1440;
+            }
+            if (outMins < shiftEndMins) {
+              earlyDepartureMinutes = shiftEndMins - outMins;
+            }
           }
         }
       }
@@ -1110,9 +1088,10 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
         limit: limitNum,
         totalPages
       },
-      startDate,
-      endDate,
-      filterType
+      date: todayStr,
+      startDate: todayStr,
+      endDate: todayStr,
+      filterType: "today"
     });
   } catch (err) {
     console.error("getAttendanceMonitoringRecords error:", err);

@@ -27,11 +27,9 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
   // Navigation sub-tab
   const [subTab, setSubTab] = useState("records"); // "records" | "live" | "regularization"
 
-  // Unified Filter State
+  // Unified Daily Filter State
   const [filters, setFilters] = useState({
-    range: "this_month",
-    startDate: "",
-    endDate: "",
+    range: "today",
     department: "all",
     status: "all",
     search: ""

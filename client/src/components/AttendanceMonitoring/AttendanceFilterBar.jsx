@@ -1,25 +1,16 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { 
   Calendar, 
   Search, 
   RefreshCw, 
   SlidersHorizontal, 
   Building2, 
-  CheckCircle2, 
-  X,
-  Clock
+  X
 } from 'lucide-react';
-import { formatDisplayDate } from '../../utils/dateUtils';
 
 export default function AttendanceFilterBar({
   filters,
   onChange,
-  filterType: propFilterType,
-  setFilterType: propSetFilterType,
-  startDate: propStartDate,
-  setStartDate: propSetStartDate,
-  endDate: propEndDate,
-  setEndDate: propSetEndDate,
   department: propDepartment,
   setDepartment: propSetDepartment,
   status: propStatus,
@@ -33,12 +24,6 @@ export default function AttendanceFilterBar({
   lastRefreshed,
   departments = []
 }) {
-  const [showCustomRange, setShowCustomRange] = useState(false);
-
-  // Unified resolution of filter values
-  const filterType = filters?.filterType || filters?.range || propFilterType || "today";
-  const startDate = filters?.startDate ?? propStartDate ?? "";
-  const endDate = filters?.endDate ?? propEndDate ?? "";
   const department = filters?.department ?? propDepartment ?? "all";
   const status = filters?.status ?? propStatus ?? "all";
   const searchQuery = filters?.search ?? filters?.searchQuery ?? propSearchQuery ?? "";
@@ -50,29 +35,10 @@ export default function AttendanceFilterBar({
       onChange((prev) => ({
         ...prev,
         [key]: value,
-        // Sync filterType and range
-        ...(key === "filterType" ? { range: value } : {}),
-        ...(key === "range" ? { filterType: value } : {}),
-        // Sync search
         ...(key === "searchQuery" ? { search: value } : {}),
         ...(key === "search" ? { searchQuery: value } : {})
       }));
     }
-  };
-
-  const setFilterType = (type) => {
-    updateFilter("filterType", type);
-    if (propSetFilterType) propSetFilterType(type);
-  };
-
-  const setStartDate = (val) => {
-    updateFilter("startDate", val);
-    if (propSetStartDate) propSetStartDate(val);
-  };
-
-  const setEndDate = (val) => {
-    updateFilter("endDate", val);
-    if (propSetEndDate) propSetEndDate(val);
   };
 
   const setDepartment = (val) => {
@@ -90,14 +56,6 @@ export default function AttendanceFilterBar({
     if (propSetSearchQuery) propSetSearchQuery(val);
   };
 
-  const filterOptions = [
-    { id: "today", label: "Today" },
-    { id: "yesterday", label: "Yesterday" },
-    { id: "this_week", label: "This Week" },
-    { id: "this_month", label: "This Month" },
-    { id: "custom", label: "Custom Range" }
-  ];
-
   const statusOptions = [
     { value: "all", label: "All Statuses" },
     { value: "Present", label: "Present" },
@@ -113,40 +71,36 @@ export default function AttendanceFilterBar({
     { value: "Attendance Locked", label: "Locked" }
   ];
 
-  const handleSelectFilterType = (type) => {
-    setFilterType(type);
-    if (type === "custom") {
-      setShowCustomRange(true);
-    } else {
-      setShowCustomRange(false);
-    }
-  };
-
   const formattedRefreshTime = refreshTimestamp
     ? (typeof refreshTimestamp === "string" && refreshTimestamp.includes(":") && !refreshTimestamp.includes("T")
         ? refreshTimestamp
         : new Date(refreshTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
     : "Just now";
 
+  const todayDisplay = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  }).format(new Date());
+
   return (
     <div className="bg-bg-card p-4 sm:p-5 rounded-[24px] border border-border-card shadow-sm mb-6 space-y-4">
-      {/* Top Filter Controls */}
+      {/* Top Header: Today's Attendance Overview & Sync Controls */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        {/* Quick Range Pills */}
-        <div className="flex items-center gap-1.5 p-1 bg-bg-base/60 rounded-[14px] border border-border-card overflow-x-auto max-w-full">
-          {filterOptions.map((opt) => (
-            <button
-              key={opt.id}
-              onClick={() => handleSelectFilterType(opt.id)}
-              className={`px-3 py-1.5 rounded-[10px] text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                filterType === opt.id
-                  ? "bg-brand-primary text-white shadow-sm shadow-brand-primary/20"
-                  : "text-text-sec hover:text-text-main hover:bg-bg-card"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-[10px] bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center">
+            <Calendar size={16} />
+          </div>
+          <div>
+            <div className="text-xs font-bold text-text-main flex items-center gap-2">
+              Today's Attendance Records
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live Daily
+              </span>
+            </div>
+            <div className="text-[11px] text-text-mut font-medium">{todayDisplay}</div>
+          </div>
         </div>
 
         {/* Refresh & Last Updated Timestamp */}
@@ -158,61 +112,32 @@ export default function AttendanceFilterBar({
 
           <button
             onClick={onRefresh}
-            disabled={isRefreshing}
+            disabled={refreshing}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-base hover:bg-bg-base/80 border border-border-card rounded-[12px] text-xs font-bold text-text-sec hover:text-brand-primary transition-all cursor-pointer disabled:opacity-50 shadow-sm"
             title="Refresh attendance records"
           >
-            <RefreshCw size={14} className={isRefreshing ? "animate-spin text-brand-primary" : ""} />
-            <span>{isRefreshing ? "Refreshing..." : "Refresh"}</span>
+            <RefreshCw size={14} className={refreshing ? "animate-spin text-brand-primary" : ""} />
+            <span>{refreshing ? "Refreshing..." : "Refresh"}</span>
           </button>
         </div>
       </div>
 
-      {/* Custom Date Range Popover/Inputs */}
-      {showCustomRange && (
-        <div className="p-3.5 bg-bg-base/40 rounded-[16px] border border-border-card flex flex-wrap items-center gap-3 animate-fade-in text-xs">
-          <span className="font-extrabold text-text-mut uppercase text-[10px]">Select Date Range:</span>
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="px-3 py-1.5 bg-bg-card border border-border-card rounded-[10px] text-text-main outline-none focus:border-brand-primary"
-            />
-            <span className="text-text-mut font-bold">to</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="px-3 py-1.5 bg-bg-card border border-border-card rounded-[10px] text-text-main outline-none focus:border-brand-primary"
-            />
-          </div>
-          <button
-            onClick={() => setShowCustomRange(false)}
-            className="text-text-mut hover:text-text-main ml-auto p-1 cursor-pointer"
-            title="Close custom picker"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      )}
-
-      {/* Secondary Filter Bar: Search, Department, Status */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-12 gap-3 pt-1 border-t border-border-card/60">
+      {/* Primary Filter Controls: Search, Department, Status */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-12 gap-3 pt-3 border-t border-border-card/60">
         {/* Search Input */}
-        <div className="sm:col-span-3 md:col-span-5 relative">
+        <div className="sm:col-span-3 md:col-span-6 relative">
           <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-mut" />
           <input
             type="text"
             placeholder="Search employee by name, ID, or email..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3.5 py-2 bg-bg-base/40 border border-border-card rounded-[12px] text-xs text-text-main placeholder:text-text-mut outline-none focus:bg-bg-card focus:border-brand-primary transition-all font-semibold"
+            className="w-full pl-9 pr-8 py-2 bg-bg-base/40 border border-border-card rounded-[12px] text-xs text-text-main placeholder:text-text-mut outline-none focus:bg-bg-card focus:border-brand-primary transition-all font-semibold"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-text-mut hover:text-text-main p-0.5"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-text-mut hover:text-text-main p-0.5 cursor-pointer"
             >
               <X size={14} />
             </button>
@@ -220,7 +145,7 @@ export default function AttendanceFilterBar({
         </div>
 
         {/* Department Filter */}
-        <div className="sm:col-span-3 md:col-span-4 relative">
+        <div className="sm:col-span-3 md:col-span-3 relative">
           <Building2 size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-mut pointer-events-none" />
           <select
             value={department}
