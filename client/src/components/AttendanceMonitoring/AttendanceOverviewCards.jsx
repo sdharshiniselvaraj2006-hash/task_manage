@@ -63,7 +63,7 @@ export default function AttendanceOverviewCards({ summary = {}, loading = false,
     },
     {
       id: "working",
-      statusKey: "Present",
+      statusKey: "working",
       label: "Currently Working",
       value: isLoaded ? (s.currentlyWorking ?? 0) : "--",
       icon: Briefcase,
@@ -74,7 +74,7 @@ export default function AttendanceOverviewCards({ summary = {}, loading = false,
     },
     {
       id: "checkout",
-      statusKey: "Present",
+      statusKey: "checked_out",
       label: "Checked Out",
       value: isLoaded ? (s.checkedOut ?? 0) : "--",
       icon: LogOut,
@@ -96,7 +96,7 @@ export default function AttendanceOverviewCards({ summary = {}, loading = false,
     },
     {
       id: "regularization",
-      statusKey: "Pending",
+      statusKey: "regularization",
       label: "Pending Regularization",
       value: isLoaded ? (s.pendingRegularization ?? 0) : "--",
       icon: FileClock,
@@ -134,7 +134,7 @@ export default function AttendanceOverviewCards({ summary = {}, loading = false,
           return (
             <div
               key={c.id}
-              onClick={() => onCardClick && onCardClick(c.statusKey)}
+              onClick={() => onCardClick && onCardClick(c.statusKey, c.id)}
               className={`bg-bg-card p-4 sm:p-5 rounded-[20px] border ${c.borderColor} shadow-sm hover:shadow-md transition-all flex flex-col justify-between cursor-pointer group`}
             >
               <div className="flex items-center justify-between mb-3">

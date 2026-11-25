@@ -101,6 +101,8 @@ export default function AttendanceFilterBar({
   const statusOptions = [
     { value: "all", label: "All Statuses" },
     { value: "Present", label: "Present" },
+    { value: "working", label: "Currently Working" },
+    { value: "checked_out", label: "Checked Out" },
     { value: "Late", label: "Late" },
     { value: "Absent", label: "Absent" },
     { value: "Half Day", label: "Half Day" },

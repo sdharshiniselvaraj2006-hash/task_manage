@@ -269,9 +269,13 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
         loading={loadingSummary}
         error={errorSummary}
         onRetry={loadSummary}
-        onCardClick={(statusKey) => {
-          setFilters((prev) => ({ ...prev, status: statusKey }));
-          setSubTab("records");
+        onCardClick={(statusKey, cardId) => {
+          if (cardId === "regularization" || statusKey === "regularization") {
+            setSubTab("regularization");
+          } else {
+            setFilters((prev) => ({ ...prev, status: statusKey }));
+            setSubTab("records");
+          }
         }}
       />
 

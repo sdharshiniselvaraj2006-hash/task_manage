@@ -1005,8 +1005,81 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
 
     // Filter by status if requested
     if (status && status !== "all") {
-      const sLower = status.toLowerCase();
-      allRecords = allRecords.filter(r => r.attendanceStatus.toLowerCase() === sLower || r.status.toLowerCase() === sLower);
+      const sLower = status.toLowerCase().trim();
+      allRecords = allRecords.filter(r => {
+        const attStatusLower = (r.attendanceStatus || "").toLowerCase();
+        const rawStatusLower = (r.status || "").toLowerCase();
+        const hasCheckIn = Boolean(
+          r.checkInRaw ||
+          (r.checkIn && r.checkIn !== "--" && r.checkIn !== "—" && r.checkIn !== "-")
+        );
+        const hasCheckOut = Boolean(
+          r.checkOutRaw ||
+          (r.checkOut && r.checkOut !== "--" && r.checkOut !== "—" && r.checkOut !== "-")
+        );
+
+        // "present": Includes everyone who attended/checked in to work (Present, Late, Half Day, Incomplete Check-out)
+        if (sLower === "present") {
+          return (
+            attStatusLower === "present" ||
+            attStatusLower === "late" ||
+            attStatusLower === "half day" ||
+            attStatusLower === "incomplete check-out" ||
+            hasCheckIn
+          );
+        }
+
+        // "late": Specifically late arrivals
+        if (sLower === "late") {
+          return (
+            attStatusLower === "late" ||
+            Boolean(r.isLate) ||
+            (typeof r.lateByMinutes === "number" && r.lateByMinutes > 0) ||
+            (typeof r.late_minutes === "number" && r.late_minutes > 0)
+          );
+        }
+
+        // "working" or "currently working": Currently active shift session (checked in, not checked out)
+        if (sLower === "working" || sLower === "currently working" || sLower === "currently_working") {
+          return Boolean(hasCheckIn && !hasCheckOut);
+        }
+
+        // "checkout" or "checked out": Completed shift session (checked in and checked out)
+        if (sLower === "checkout" || sLower === "checked out" || sLower === "checked_out") {
+          return Boolean(hasCheckIn && hasCheckOut);
+        }
+
+        // "absent": Absent employees (no check-in and not on leave/holiday/weekly off)
+        if (sLower === "absent") {
+          return (
+            attStatusLower === "absent" ||
+            (!hasCheckIn && attStatusLower !== "on leave" && attStatusLower !== "holiday" && attStatusLower !== "weekly off")
+          );
+        }
+
+        // "on leave"
+        if (sLower === "on leave" || sLower === "on_leave" || sLower === "leave") {
+          return attStatusLower === "on leave" || rawStatusLower === "on-leave";
+        }
+
+        // "half day"
+        if (sLower === "half day" || sLower === "half_day" || sLower === "halfday") {
+          return attStatusLower === "half day" || rawStatusLower === "half-day";
+        }
+
+        // "attendance locked" or "locked"
+        if (sLower === "attendance locked" || sLower === "locked" || sLower === "attendance_locked") {
+          return Boolean(r.isAdminLocked || r.is_admin_locked || attStatusLower.includes("locked"));
+        }
+
+        // "pending"
+        if (sLower === "pending") {
+          return attStatusLower === "pending" || rawStatusLower === "pending";
+        }
+
+        // Exact fallback match
+        return attStatusLower === sLower || rawStatusLower === sLower;
+      });
     }
 
     // Sort
